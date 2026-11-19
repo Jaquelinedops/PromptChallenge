@@ -12,7 +12,25 @@ $('loginTab').onclick=()=>authMode(false);$('registerTab').onclick=()=>authMode(
 $('authForm').onsubmit=async event=>{event.preventDefault();const payload={email:$('email').value,password:$('password').value};if(ui.register)payload.name=$('name').value;try{const result=await api(ui.register?'register':'login','POST',payload);if(ui.register){notify(result.message);authMode(false)}else{ui.me=result;await start()}}catch(e){notify(e.message)}};
 async function start(){show('auth',false);setIdentity();if(ui.me.role==='admin'){const data=await api('admin/ui');$('admin').innerHTML=data.markup;bindAdmin();show('admin',true)}else show('admin',false);await refresh();if(ui.me.role==='admin')await loadAdmin()}
 function bubble(role,content){const n=el('div','bubble '+(role==='user'?'user':''));text(n,content);return n}
-function renderCatalogue(challenges){const node=$('catalogue');node.replaceChildren();for(const c of challenges||[]){const item=el('article','mission-item'+(c.passed?' passed':'')+(!c.unlocked?' locked':''));item.append(el('div','index',`${c.scenario_title} · #${c.position}`),el('h3','',c.title),el('div','status',c.passed?'✓ Concluído':c.unlocked?'● Disponível':'🔒 Bloqueado'));const btn=el('button',c.unlocked?'primary':'ghost',c.passed&&!c.currently_active?'Revisar histórico':c.unlocked?'Selecionar missão':'Pré-requisitos pendentes');btn.disabled=!c.unlocked&&!c.passed;btn.onclick=async()=>{try{if(c.passed&&!c.currently_active){await openReview(c.id);return}await api('select','POST',{challenge_id:c.id});await refresh()}catch(e){notify(e.message)}};item.append(btn);node.append(item)}}
+function renderCatalogue(challenges){
+ const node=$('catalogue');node.replaceChildren();
+ for(const c of challenges||[]){
+  const item=el('article','mission-item'+(c.passed?' passed':'')+(!c.unlocked?' locked':''));
+  item.append(el('div','index',`${c.scenario_title} · #${c.position}`),el('h3','',c.title),el('div','status',c.passed?'✓ Concluído':c.unlocked?'● Disponível':'🔒 Bloqueado'));
+  const btn=el('button',c.unlocked?'primary':'ghost',c.passed&&!c.currently_active?'Revisar histórico':c.unlocked?'Selecionar missão':'Pré-requisitos pendentes');
+  btn.disabled=!c.unlocked&&!c.passed;
+  btn.onclick=async()=>{try{if(c.passed&&!c.currently_active){await openReview(c.id);return}await api('select','POST',{challenge_id:c.id});await refresh()}catch(e){notify(e.message)}};
+  item.append(btn);
+  // A revisão permanece acessível mesmo após reiniciar a conversa ou encerrar a sessão.
+  if(c.has_judgments){
+   const review=el('button','ghost','Avaliações e pedidos de revisão');
+   review.type='button';
+   review.onclick=()=>openReview(c.id).catch(e=>notify(e.message));
+   item.append(review);
+  }
+  node.append(item);
+ }
+}
 function timerUI(ch){
  ui.timerEnd=ch?.time_limit_minutes&&ch?.run_started_at?Date.parse(ch.run_started_at)+ch.time_limit_minutes*60000:null;
  ui.timerPolicy=ch?.time_limit_policy||'warn'; updateTimer();
@@ -64,6 +82,7 @@ async function refresh(){try{const state=await api('state');ui.state=state;rende
  }catch(e){notify(e.message)}}
 async function choose(){show('chooser',true);show('activity',false);show('game',false);try{const {challenges}=await api('catalogue');if(ui.state)ui.state.catalogue=challenges;renderCatalogue(challenges)}catch(e){notify(e.message);renderCatalogue(ui.state?.catalogue||[])}}
 $('changeChallenge').onclick=choose;$('returnChooser').onclick=choose;
+$('reviewJudgments').onclick=()=>{if(!ui.activeChallengeId)return notify('Selecione um desafio para revisar.');openReview(ui.activeChallengeId).catch(e=>notify(e.message))};
 $('activate').onclick=async()=>{try{$('activate').disabled=true;const r=await api('activate','POST',{});notify('Sessão iniciada. Boa sorte!');await refresh()}catch(e){notify(e.message)}finally{$('activate').disabled=false}};
 $('chatForm').onsubmit=async event=>{event.preventDefault();if(ui.busy)return;const query=$('query').value.trim();if(!query)return;ui.busy=true;$('send').disabled=true;const messages=$('messages');messages.querySelector('.empty')?.remove();messages.append(bubble('user',query));$('query').value='';const loading=bubble('assistant','Consultando o assistente...');messages.append(loading);messages.scrollTop=messages.scrollHeight;try{const result=await api('chat','POST',{text:query});if(result.reset){notify(result.message);await refresh()}else {text(loading,result.answer||'(Resposta vazia)');if(result.prompt_count!==undefined)text($('promptCounter'),'Prompts enviados nesta jogada: '+result.prompt_count)}}catch(e){notify(e.message);await refresh()}finally{ui.busy=false;$('send').disabled=false}};
 $('submit').onclick=async()=>{if(ui.busy)return;ui.busy=true;$('submit').disabled=true;try{const r=await api('submit','POST',{});$('result').className=r.won?'status-good':'status-bad';text($('result'),(r.won?'✓ Desafio vencido. ':'✕ Ainda não. ')+(r.reason||''));if(r.prompt_count!==undefined)text($('promptCounter'),'Prompts enviados nesta jogada: '+r.prompt_count);configureAppeal(r.won?null:r.attempt_id,[]);if(r.won){notify('Conquista registrada! A conversa permanece disponível.');setChatLocked(true);showWinActions(true,!!r.replay_allowed)}}catch(e){notify(e.message)}finally{ui.busy=false;$('submit').disabled=false}};
@@ -73,10 +92,10 @@ function configureAppeal(attemptId,appeals=[]){
  const existing=(appeals||[]).find(x=>String(x.attempt_id)===String(attemptId))||(appeals||[]).find(x=>x.status==='pending'||x.status==='approved'||x.status==='rejected');
  box.hidden=!attemptId&&!existing;
  $('appealToggle').hidden=!attemptId||!!existing;
- text(status,existing?existing.status==='pending'?'Contestação enviada. Aguardando análise da administração.':existing.status==='approved'?'Contestação aprovada pela administração.':'Contestação reprovada pela administração. '+(existing.admin_note||''):'');
+ text(status,existing?existing.status==='pending'?'Revisão solicitada. Aguardando decisão da administração.':existing.status==='approved'?'Revisão aprovada pela administração.':'Revisão reprovada pela administração. '+(existing.admin_note||''):'');
 }
 $('appealToggle').onclick=()=>{$('appealForm').hidden=!$('appealForm').hidden};
-$('appealForm').onsubmit=async e=>{e.preventDefault();if(!ui.appealAttemptId)return;const button=e.currentTarget.querySelector('button[type=submit]');button.disabled=true;try{await api('appeals','POST',{attempt_id:String(ui.appealAttemptId),reason:$('appealReason').value.trim()});notify('Contestação encaminhada à administração.');configureAppeal(ui.appealAttemptId,[{attempt_id:ui.appealAttemptId,status:'pending'}])}catch(err){notify(err.message)}finally{button.disabled=false}};
+$('appealForm').onsubmit=async e=>{e.preventDefault();if(!ui.appealAttemptId)return;const button=e.currentTarget.querySelector('button[type=submit]');button.disabled=true;try{await api('appeals','POST',{attempt_id:String(ui.appealAttemptId),reason:$('appealReason').value.trim()});notify('Pedido de revisão encaminhado à administração.');configureAppeal(ui.appealAttemptId,[{attempt_id:ui.appealAttemptId,status:'pending'}])}catch(err){notify(err.message)}finally{button.disabled=false}};
 $('reviewCurrent').onclick=async()=>{try{await openReview(ui.activeChallengeId)}catch(e){notify(e.message)}};
 $('replayCurrent').onclick=async()=>{try{await replayChallenge(ui.activeChallengeId)}catch(e){notify(e.message)}};
 $('nextMission').onclick=()=>{ui.reviewing=false;choose()};

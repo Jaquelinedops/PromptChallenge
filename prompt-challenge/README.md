@@ -144,3 +144,8 @@ O HTML do painel é devolvido somente por `GET /api/admin/ui`, após autenticaç
 - `GET /api/state` filtra mensagens pela `generation` atual, para reinícios de conversa realmente esvaziarem a tela.
 - `admin/appeals` recebe ID numérico, corrigindo "Dados da decisão inválidos" ao aprovar/reprovar.
 - O painel administrativo não é incluído no HTML público; sua marcação é carregada somente por administrador autenticado.
+
+
+### Revisão humana do julgamento (v4.4)
+
+Após uma avaliação não aprovada, o participante pode clicar em **Solicitar revisão do juiz** e enviar justificativa. A solicitação pode ser reencontrada pelo botão **Revisar avaliações** na tela do desafio ou em **Avaliações e pedidos de revisão** no catálogo, mesmo depois de uma nova conversa. A decisão administrativa é feita na aba **Contestações** (aprovar ou reprovar). Requer a migração `sql/05_appeals_and_progress.sql` já aplicada ao Neon.

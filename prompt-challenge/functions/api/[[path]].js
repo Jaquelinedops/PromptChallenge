@@ -63,10 +63,11 @@ async function challengesForUser(sql,user){
  const all=await sql`SELECT c.id,c.scenario_id,c.position,c.title,c.description,c.hint,c.active,c.unlock_mode,c.judge_mode,s.title AS scenario_title,s.position AS scenario_position,s.id AS sid FROM challenges c JOIN scenarios s ON s.id=c.scenario_id WHERE s.active AND c.active ORDER BY s.position,c.position`;
  const passed=await sql`SELECT challenge_id FROM progress WHERE user_id=${user.id} AND ever_passed=true`;
  const unlocked=await sql`SELECT challenge_id FROM pc_unlocked_challenges(${user.id})`;
- const pset=new Set(passed.map(x=>x.challenge_id)),uset=new Set(unlocked.map(x=>x.challenge_id));
+ const withJudgments=await sql`SELECT DISTINCT challenge_id FROM attempts WHERE user_id=${user.id}`;
+ const pset=new Set(passed.map(x=>x.challenge_id)),uset=new Set(unlocked.map(x=>x.challenge_id)),jset=new Set(withJudgments.map(x=>x.challenge_id));
  const runs=await sql`SELECT p.challenge_id,p.status,p.run_no,c.replay_enabled,c.max_replays FROM progress p JOIN challenges c ON c.id=p.challenge_id WHERE p.user_id=${user.id}`;
  const rmap=new Map(runs.map(x=>[x.challenge_id,x]));
- return all.map(c=>({id:c.id,scenario_id:c.scenario_id,position:c.position,title:c.title,scenario_title:c.scenario_title,scenario_position:c.scenario_position,passed:pset.has(c.id),currently_active:rmap.get(c.id)?.status==='active',unlocked:uset.has(c.id),replay_allowed:!!(rmap.get(c.id)?.replay_enabled&&(rmap.get(c.id)?.run_no-1)<rmap.get(c.id)?.max_replays),replays_used:Math.max(0,(rmap.get(c.id)?.run_no||1)-1),max_replays:rmap.get(c.id)?.max_replays||0,unlock_mode:c.unlock_mode}));
+ return all.map(c=>({id:c.id,scenario_id:c.scenario_id,position:c.position,title:c.title,scenario_title:c.scenario_title,scenario_position:c.scenario_position,passed:pset.has(c.id),has_judgments:jset.has(c.id),currently_active:rmap.get(c.id)?.status==='active',unlocked:uset.has(c.id),replay_allowed:!!(rmap.get(c.id)?.replay_enabled&&(rmap.get(c.id)?.run_no-1)<rmap.get(c.id)?.max_replays),replays_used:Math.max(0,(rmap.get(c.id)?.run_no||1)-1),max_replays:rmap.get(c.id)?.max_replays||0,unlock_mode:c.unlock_mode}));
 }
 async function state(sql,user){
  const catalogue=await challengesForUser(sql,user);
