@@ -102,3 +102,25 @@ ORDER BY u.name,c.position;
 **Teste em homologação:** 1. concluir desafio; 2. conferir feedback sem troca automática; 3. revisar histórico; 4. jogar novamente e conferir que pré-requisitos continuam satisfeitos; 5. contar prompts após reset; 6. conferir limites e relatórios; 7. testar cronômetro com aviso/bloqueio; 8. testar submissões concorrentes e falha dupla do juiz.
 
 Não foi feita validação com sua base Neon ou com Dify/Groq reais. Não implante a migração em produção sem backup e testes.
+
+
+## Atualização: contestações de julgamento e linguagem inclusiva
+
+**Antes de publicar o código desta versão:** faça backup do Neon e execute `sql/05_appeals_and_progress.sql` no SQL Editor **depois** da migração v4 `04_replay_history_timers.sql`. O ZIP original não incluía os scripts SQL 01–04. Se não foram executados, recupere-os da versão anterior; o script 05 não substitui a estrutura/functions de v4.
+
+- Jogadores podem contestar uma tentativa reprovada, uma vez por tentativa, com justificativa.
+- A administração possui a aba **Contestações**, com histórico das mensagens e decisão de aprovar/reprovar.
+- Aprovação preserva o veredito original em `attempts`, registra revisão em `judgment_appeals`, marca a conquista permanente em `progress.ever_passed` e encerra a jogada correspondente.
+- Reprovação preserva o resultado anterior; a contestação permanece no histórico.
+- O acesso via Netlify proxy `cyberactivity.com.br/promptchallenge` foi autorizado na verificação de Origin para POST sem desabilitar essa proteção.
+- O script 05 também restaura a coluna `ever_passed` ausente em certas bases, com backfill de vitórias históricas. Se outras colunas/funções v4 estiverem ausentes, execute a migração v4 original antes desta.
+- **Limitação de teste:** integração com Neon, Dify, Groq, Netlify e Cloudflare Pages não foi executada neste ambiente; testar em homologação antes da produção.
+
+### Checklist de validação
+
+1. Faça login como jogador aprovado; `/api/state` deve responder 200.
+2. Submeta uma avaliação reprovada e envie uma contestação.
+3. No painel admin, abra **Contestações**, consulte a conversa e aprove uma contestação.
+4. Confirme no SQL Editor `progress.ever_passed = true`, `challenge_runs.won = true`, `judgment_appeals.status = 'approved'`.
+5. Confirme que o catálogo libera os pré-requisitos e que o veredito original não foi alterado.
+6. Teste reprovação e tentativa de decidir duas vezes (a segunda deve falhar).
