@@ -126,11 +126,26 @@ export async function onRequest(context) {
  const {request,env}=context;
  const url=new URL(request.url), path=url.pathname.slice(5),method=request.method;
  const allowed=['GET','POST'];if(!allowed.includes(method))return fail('Método não permitido',405);
- if(method==='POST'){
-  const origin=request.headers.get('Origin');
-  if(!origin||origin!==url.origin) return fail('Origem inválida',403);
-  if(!request.headers.get('Content-Type')?.startsWith('application/json')) return fail('Tipo de conteúdo inválido',415);
- }
+
+ 
+if (method === 'POST') {
+  const origin = request.headers.get('Origin');
+
+  const allowedOrigins = new Set([
+    'https://cyberactivity.com.br',
+    'https://promptchallenge.pages.dev'
+  ]);
+
+  if (!origin || !allowedOrigins.has(origin)) {
+    return fail('Origem inválida', 403);
+  }
+
+  if (!request.headers.get('Content-Type')
+      ?.startsWith('application/json')) {
+    return fail('Tipo de conteúdo inválido', 415);
+  }
+}
+
  if(!env.DATABASE_URL)return fail('Banco não configurado',503);
  const sql=neon(env.DATABASE_URL);
  try {
