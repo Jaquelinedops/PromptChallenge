@@ -156,3 +156,9 @@ Após uma avaliação não aprovada, o participante pode clicar em **Solicitar r
 - **Limpar histórico**: durante um desafio ativo, zera `conversation_id` e incrementa `generation`, limpando a tela do chat; a próxima mensagem inicia conversa nova no Dify. Não altera `run_no` nem conquista ou libera replay. O histórico é preservado no Neon.
 - **Jogar novamente**: exibido somente após a vitória e se permitido em `replay_enabled`/`max_replays`; chama a função `pc_start_replay`, preserva a conquista anterior e inicia outra jogada.
 - O antigo botão **Encerrar** foi removido da tela do jogador (endpoint administrativo/de liberação de vaga preservado).
+
+
+### Interface de contestação e repetição (v4.7)
+- O campo curto e botão **Solicitar revisão** aparecem exclusivamente abaixo do resultado negativo do juiz, na tentativa ativa. A decisão do administrador é humana (aprovar = vitória; reprovar = resultado original).
+- No catálogo, **Fazer novamente** aparece apenas para desafios concluídos e com replay disponível conforme `replay_enabled` e `max_replays` no banco. Vitórias anteriores são mantidas.
+- **Limpar histórico** mantém a jogada, zera o identificador de conversa no backend e limpa o chat da tela, sem usar uma repetição.
