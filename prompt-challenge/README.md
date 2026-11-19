@@ -124,3 +124,23 @@ Não foi feita validação com sua base Neon ou com Dify/Groq reais. Não implan
 4. Confirme no SQL Editor `progress.ever_passed = true`, `challenge_runs.won = true`, `judgment_appeals.status = 'approved'`.
 5. Confirme que o catálogo libera os pré-requisitos e que o veredito original não foi alterado.
 6. Teste reprovação e tentativa de decidir duas vezes (a segunda deve falhar).
+
+
+## Endpoints privados (Cloudflare Pages)
+
+Configure em **Workers & Pages → Prompt Challenge → Settings → Variables and Secrets** (Production e Preview, conforme o ambiente):
+
+- `DIFY_API_BASE_URL` = `https://api.dify.ai/v1`
+- `GROQ_API_BASE_URL` = `https://api.groq.com/openai/v1/chat/completions`
+
+As chaves `DIFY_KEY_A`, `DIFY_KEY_B`, `GROQ_KEY_A` e `GROQ_KEY_B` continuam como Secrets por provedor, conforme a configuração existente.
+
+Os endpoints são validados contra hosts e caminhos permitidos (não é possível cadastrar destinos arbitrários pelo painel). Os valores não são servidos no `index.html` ou no endpoint de configuração do administrador. Variáveis não definidas usam os endereços padrão **apenas no backend** por compatibilidade; para centralizar configuração, defina-as explicitamente.
+
+O HTML do painel é devolvido somente por `GET /api/admin/ui`, após autenticação e autorização de administrador. O bundle JavaScript de interface continua público e não deve conter segredos.
+
+## Correções adicionais desta versão
+
+- `GET /api/state` filtra mensagens pela `generation` atual, para reinícios de conversa realmente esvaziarem a tela.
+- `admin/appeals` recebe ID numérico, corrigindo "Dados da decisão inválidos" ao aprovar/reprovar.
+- O painel administrativo não é incluído no HTML público; sua marcação é carregada somente por administrador autenticado.
