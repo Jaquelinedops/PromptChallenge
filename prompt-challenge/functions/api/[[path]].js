@@ -168,7 +168,8 @@ async function judgeSettings(sql,scenarioId){const rows=await sql`SELECT coalesc
 export async function onRequest(context) {
  const {request,env}=context;
  const url=new URL(request.url), path=url.pathname.slice(5),method=request.method;
- const clientIp=await trustedClientIp(request,env,url);if(!clientIp)return fail('Rota não encontrada',404);
+ const clientIp=await trustedClientIp(request,env,url);
+ if(!clientIp)return fail(env.PROXY_SHARED_SECRET?.length>=32?'Acesso à API exige o proxy autorizado':'Configuração do proxy incompleta',env.PROXY_SHARED_SECRET?.length>=32?403:503);
  const allowed=['GET','POST'];if(!allowed.includes(method))return fail('Método não permitido',405);
  if(method==='POST'){
   const origin=request.headers.get('Origin');
