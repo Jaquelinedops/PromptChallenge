@@ -1,0 +1,59 @@
+/* v4.9 - Responsive layout additions. Loaded after style.css. */
+html { -webkit-text-size-adjust: 100%; }
+body { min-width: 0; }
+main, section, aside, .card, .entry, .entry > div, .admin-panel, .victory-details { min-width: 0; }
+input, textarea, select, button { max-width: 100%; }
+button, input, textarea, select { font-size: max(16px, 1rem); }
+button { min-height: 42px; }
+:where(.entry, .diagnostic-card, .bubble, .muted, p, h1, h2, h3, label) { overflow-wrap: anywhere; }
+.admin-tabs { scrollbar-width: thin; scroll-snap-type: x proximity; overscroll-behavior-x: contain; }
+.admin-tabs > button { flex: 0 0 auto; scroll-snap-align: start; }
+.victory-conversation { max-height: min(70vh, 720px); overflow-y: auto; overscroll-behavior: contain; padding: 12px 2px; }
+.victory-entry > button { flex-shrink: 0; }
+.messages { min-height: min(360px, 42dvh); max-height: min(560px, 58dvh); }
+.entry > div:last-child { min-width: 0; }
+@media (min-width: 1600px) {
+  main { max-width: 1480px; }
+  .site-header { padding-inline: max(36px, calc((100vw - 1480px) / 2)); }
+  .game-layout { grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); gap: 26px; }
+  .messages { max-height: min(700px, 65dvh); }
+}
+@media (max-width: 850px) {
+  .section-head { flex-wrap: wrap; gap: 12px; }
+  .site-header { gap: 12px; flex-wrap: wrap; }
+  .game-layout { grid-template-columns: minmax(0, 1fr); }
+  .admin-panel { padding: 18px; }
+  .entry { align-items: flex-start; flex-wrap: wrap; }
+  .entry > div:first-child { flex: 1 1 100%; }
+  .entry > button, .entry > div:last-child { flex: 0 1 auto; }
+}
+@media (max-width: 600px) {
+  main { padding-inline: 12px; }
+  .card { border-radius: 14px; padding: 15px; }
+  .chat-card { padding: 0; }
+  .mission-grid, .diagnostic-grid { grid-template-columns: minmax(0, 1fr); }
+  .hero h1 { font-size: clamp(32px, 9vw, 44px); }
+  .head-icon { display: none; }
+  .admin-tabs { margin-inline: -4px; }
+  .admin-tabs button { padding: 12px 14px; }
+  .panel-title { flex-direction: column; align-items: stretch; }
+  .game-top, .game-actions { align-items: stretch; flex-direction: column; }
+  .game-actions button { width: 100%; }
+  .messages { padding: 12px; min-height: 35dvh; max-height: 52dvh; }
+  .bubble { max-width: 96%; padding: 11px 12px; }
+  #chatForm { padding: 12px; flex-wrap: wrap; }
+  #chatForm textarea { flex: 1 1 100%; min-height: 80px; }
+  #chatForm button { width: 100%; }
+  .entry { padding: 12px; }
+  .entry > button, .entry > div:last-child, .appeal-actions, .diagnostic-actions { width: 100%; }
+  .entry > div:last-child button, .appeal-actions button { flex: 1 1 125px; }
+  .victory-entry > button { width: 100%; }
+  .victory-conversation { max-height: 60dvh; }
+  .victory-pagination { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  #victoriesPage { grid-column: 1 / -1; grid-row: 1; text-align: center; }
+  .victory-pagination button { width: 100%; }
+  .two, .three { grid-template-columns: minmax(0, 1fr); }
+  .site-header { padding-inline: 12px; }
+  #toast { bottom: max(12px, env(safe-area-inset-bottom)); right: 12px; left: 12px; max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }

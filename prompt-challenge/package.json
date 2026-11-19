@@ -6,6 +6,6 @@
     "dev": "wrangler pages dev public",
     "deploy": "wrangler pages deploy public --project-name prompt-challenge"
   },
-  "dependencies": {"@neondatabase/serverless":"^1.0.2"},
-  "devDependencies": {"wrangler":"^4.0.0"}
+  "dependencies": {"@neondatabase/serverless":"1.2.1"},
+  "devDependencies": {"wrangler":"4.165.0"}
 }

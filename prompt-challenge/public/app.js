@@ -54,7 +54,7 @@ async function openReview(challengeId,runNo=0){
  text($('sessionInfo'),'Histórico salvo · jogada '+r.run_no);
  const history=$('reviewHistory');history.hidden=false;history.replaceChildren();for(const runItem of r.runs){const b=el('button','ghost',`Jogada ${runItem.run_no} · ${runItem.prompt_count} prompts${runItem.won?' · ✓':''}`);b.disabled=runItem.run_no===r.run_no;b.onclick=()=>openReview(challengeId,runItem.run_no).catch(e=>notify(e.message));history.append(b)}
  const last=r.attempts.at(-1);const won=!!run?.won;
- $('result').className=won?'status-good':'status-bad';text($('result'),won?'✓ Desafio concluído. Resultado preservado no Neon.':last?`Último julgamento: ${last.result?'Aprovado':'Não aprovado'} · ${last.feedback}`:'Histórico de execução');
+ $('result').className=won?'status-good':'status-bad';text($('result'),won?'✓ Desafio concluído. Resultado preservado no Neon.':last?`Último julgamento: ${last.result?'Aprovado':'Não aprovado'}`:'Histórico de execução');
  setChatLocked(true);showWinActions(won);
  // A revisão só pode ser solicitada diretamente sob o resultado do juiz na sessão ativa.
  show('appealBox',false);
@@ -73,14 +73,14 @@ async function refresh(){try{const state=await api('state');ui.state=state;rende
  fillMessages(state.messages);text($('promptCounter'),'Prompts enviados nesta jogada: '+(state.prompt_count||0));
  text($('result'),'');$('result').className='';setChatLocked(false);updateTimer();
     const last=state.lastJudgment;
-    if(last){$('result').className=last.result?'status-good':'status-bad';text($('result'),last.result?'✓ Desafio concluído.':'Último julgamento: não aprovado. '+(last.feedback||''))}
+    if(last){$('result').className=last.result?'status-good':'status-bad';text($('result'),last.result?'✓ Desafio concluído.':'Último julgamento: não aprovado.')}
     configureAppeal(last?.result?null:last?.id,state.appeals||[]);
  }catch(e){notify(e.message)}}
 async function choose(){show('chooser',true);show('activity',false);show('game',false);try{const {challenges}=await api('catalogue');if(ui.state)ui.state.catalogue=challenges;renderCatalogue(challenges)}catch(e){notify(e.message);renderCatalogue(ui.state?.catalogue||[])}}
 $('changeChallenge').onclick=choose;$('returnChooser').onclick=choose;
 $('activate').onclick=async()=>{try{$('activate').disabled=true;const r=await api('activate','POST',{});notify('Sessão iniciada. Boa sorte!');await refresh()}catch(e){notify(e.message)}finally{$('activate').disabled=false}};
 $('chatForm').onsubmit=async event=>{event.preventDefault();if(ui.busy)return;const query=$('query').value.trim();if(!query)return;ui.busy=true;$('send').disabled=true;const messages=$('messages');messages.querySelector('.empty')?.remove();messages.append(bubble('user',query));$('query').value='';const loading=bubble('assistant','Consultando o assistente...');messages.append(loading);messages.scrollTop=messages.scrollHeight;try{const result=await api('chat','POST',{text:query});if(result.reset){notify(result.message);await refresh()}else {text(loading,result.answer||'(Resposta vazia)');if(result.prompt_count!==undefined)text($('promptCounter'),'Prompts enviados nesta jogada: '+result.prompt_count)}}catch(e){notify(e.message);await refresh()}finally{ui.busy=false;$('send').disabled=false}};
-$('submit').onclick=async()=>{if(ui.busy)return;ui.busy=true;$('submit').disabled=true;try{const r=await api('submit','POST',{});$('result').className=r.won?'status-good':'status-bad';text($('result'),(r.won?'✓ Desafio vencido. ':'✕ Ainda não. ')+(r.reason||''));if(r.prompt_count!==undefined)text($('promptCounter'),'Prompts enviados nesta jogada: '+r.prompt_count);configureAppeal(r.won?null:r.attempt_id,[]);if(r.won){notify('Conquista registrada! A conversa permanece disponível.');setChatLocked(true);showWinActions(true)}}catch(e){notify(e.message)}finally{ui.busy=false;$('submit').disabled=false}};
+$('submit').onclick=async()=>{if(ui.busy)return;ui.busy=true;$('submit').disabled=true;try{const r=await api('submit','POST',{});$('result').className=r.won?'status-good':'status-bad';text($('result'),r.won?'✓ Desafio vencido.':'✕ Ainda não.');if(r.prompt_count!==undefined)text($('promptCounter'),'Prompts enviados nesta jogada: '+r.prompt_count);configureAppeal(r.won?null:r.attempt_id,[]);if(r.won){notify('Conquista registrada! A conversa permanece disponível.');setChatLocked(true);showWinActions(true)}}catch(e){notify(e.message)}finally{ui.busy=false;$('submit').disabled=false}};
 function configureAppeal(attemptId,appeals=[]){
  ui.appealAttemptId=attemptId||null;
  const box=$('appealBox'),form=$('appealForm'),status=$('appealStatus');
@@ -107,6 +107,45 @@ function setTab(name){ui.chosenTab=name;for(const b of document.querySelectorAll
 function diagnosticCard(kind,provider){const card=el('div','diagnostic-card');card.append(el('div','eyebrow',kind==='dify'?'ASSISTENTE RAG':'AVALIADOR'),el('h3','',provider.label),el('div','diagnostic-meta',kind==='dify'?`${provider.dify_secret_name} · ${provider.max_active} vagas`:provider.secret_name+' · '+provider.model));const status=el('div','diagnostic-output','Ainda não testada.');const actions=el('div','diagnostic-actions');for(const [mode,label] of [['connect','Testar conexão'],['functional','Teste funcional']]){const button=el('button',mode==='functional'?'ghost':'primary',label);button.onclick=async()=>{button.disabled=true;status.className='diagnostic-output';text(status,'Verificando '+provider.label+'...');try{const r=await api('admin/diagnostics','POST',{kind,id:provider.id,mode});status.className='diagnostic-output '+(r.ok?'good':'bad');text(status,`${r.ok?'✓ Disponível':'✕ Indisponível'} · HTTP ${r.status??'—'} · ${r.latency_ms} ms\n${r.note}`)}catch(e){status.className='diagnostic-output bad';text(status,e.message)}finally{button.disabled=false}};actions.append(button)}card.append(actions,status);return card}
 function renderDiagnostics(){const root=$('diagnostics');root.replaceChildren();for(const iface of ui.admin.interfaces)root.append(diagnosticCard('dify',iface));for(const prov of ui.admin.providers)root.append(diagnosticCard('judge',prov))}
 async function loadAdmin(){try{const [u,c,i,s,j,ap]=await Promise.all(['admin/users','admin/challenges','admin/interfaces','admin/scenarios','admin/judge-settings','admin/appeals'].map(x=>api(x)));ui.admin={users:u.users,challenges:c.challenges,prerequisites:c.prerequisites,interfaces:i.interfaces,scenarios:s.scenarios,scenarioDeps:s.dependencies,providers:j.providers,settings:j.settings[0],overrides:j.overrides,appeals:ap.appeals};renderAdmin()}catch(e){notify('Falha ao carregar painel: '+e.message)}}
+async function loadVictories(page=0){
+ const root=$('victoriesList');if(!root)return;
+ root.replaceChildren(el('p','muted','Carregando conversas vencedoras...'));
+ try{
+  const data=await api('admin/victories?page='+page);
+  ui.victoriesPage=data.page;
+  root.replaceChildren();
+  if(!data.victories.length)root.append(el('p','muted',page?'Não existem mais vitórias nesta página.':'Nenhuma conversa vencedora registrada.'));
+  for(const win of data.victories){
+   const card=el('div','entry victory-entry');
+   const details=el('div','victory-details');
+   const source=win.source==='admin'?'Aprovada pelo administrador (reavaliação)':'Aprovada pelo juiz';
+   details.append(el('b','',win.player_name+' · '+win.challenge_title),
+    el('div','muted',win.scenario_title+' · Jogada '+win.run_no+' · '+win.prompt_count+' prompts'),
+    el('div','muted',source+' · '+(win.approved_at?new Date(win.approved_at).toLocaleString('pt-BR'):'Data indisponível')));
+   const open=el('button','ghost','Ver conversa completa');
+   open.onclick=async()=>{
+    open.disabled=true;
+    try{
+     const review=await api('review?challenge_id='+encodeURIComponent(win.challenge_id)+'&run_no='+win.run_no+'&user_id='+encodeURIComponent(win.user_id));
+     const existing=card.querySelector('.victory-conversation');if(existing){existing.remove();return}
+     const history=el('div','victory-conversation');
+     history.append(el('h3','','Histórico da jogada '+win.run_no));
+     for(const m of review.messages)history.append(bubble(m.role,m.content));
+     if(!review.messages.length)history.append(el('p','muted','Nenhuma mensagem registrada para esta jogada.'));
+     history.append(el('p','muted','Origem da vitória: '+source));
+     if(win.verdict)history.append(el('p','muted','Parecer do juiz: '+win.verdict));
+     if(win.admin_note)history.append(el('p','muted','Observação do administrador: '+win.admin_note));
+     const close=el('button','ghost','Fechar conversa');close.onclick=()=>history.remove();history.append(close);
+     card.append(history);
+    }catch(err){notify(err.message)}finally{open.disabled=false}
+   };
+   card.append(details,open);root.append(card);
+  }
+  $('victoriesPrevious').disabled=page===0;
+  $('victoriesNext').disabled=!data.has_more;
+  text($('victoriesPage'),'Página '+(page+1));
+ }catch(err){root.replaceChildren(el('p','status-bad','Falha ao carregar vitórias: '+err.message));notify(err.message)}
+}
 function renderAppeals(){const root=$('appealsList');root.replaceChildren();const pending=ui.admin?.appeals||[];
  if(!pending.length){root.append(el('p','muted','Nenhuma contestação pendente.'));return}
  for(const ap of pending){const card=el('div','appeal-review entry');const details=el('div');details.append(el('b','',ap.player_name+' · '+ap.challenge_title),el('p','muted','Veredicto do juiz: '+(ap.judge_feedback||'Sem justificativa')),el('p','','Contestação: '+ap.reason));card.append(details);
@@ -143,9 +182,12 @@ function clearChallengeForm(){
 function bindAdmin(){
 $('unlockMode').onchange=updatePrerequisiteUI;
 $('clearPrerequisites').onclick=()=>setChallengePrerequisites([]);
-for(const b of document.querySelectorAll('#adminTabs button'))b.onclick=()=>setTab(b.dataset.tab);
+for(const b of document.querySelectorAll('#adminTabs button'))b.onclick=()=>{setTab(b.dataset.tab);if(b.dataset.tab==='victories')loadVictories(0)};
 $('reloadDiagnostics').onclick=async()=>{await loadAdmin();setTab('diagnostics')};
 $('refreshAppeals').onclick=loadAdmin;
+$('refreshVictories').onclick=()=>loadVictories(0);
+$('victoriesPrevious').onclick=()=>loadVictories(Math.max(0,(ui.victoriesPage||0)-1));
+$('victoriesNext').onclick=()=>loadVictories((ui.victoriesPage||0)+1);
 $('scenarioForm').onsubmit=e=>{e.preventDefault();save('admin/scenarios',{id:$('scenarioId').value||undefined,slug:$('scenarioSlug').value,title:$('scenarioTitle').value,description:$('scenarioDescription').value,position:Number($('scenarioPosition').value),active:$('scenarioActive').checked,prerequisite_ids:getSelected('scenarioDependencies')},e.currentTarget)};
 $('interfaceForm').onsubmit=e=>{e.preventDefault();save('admin/interfaces',{id:$('poolId').value||undefined,scenario_id:$('poolScenario').value,label:$('poolLabel').value,priority:Number($('poolPriority').value),max_active:Number($('poolCapacity').value),duration_minutes:Number($('poolDuration').value),idle_minutes:Number($('poolIdle').value),enabled:$('poolEnabled').checked,dify_base_url:$('poolDifyUrl').value,dify_secret_name:$('poolDifySecret').value},e.currentTarget)};
 $('providerForm').onsubmit=e=>{e.preventDefault();save('admin/judge-providers',{id:$('providerId').value||undefined,label:$('providerLabel').value,secret_name:$('providerSecret').value,endpoint:$('providerUrl').value,model:$('providerModel').value,priority:Number($('providerPriority').value),enabled:$('providerEnabled').checked},e.currentTarget)};

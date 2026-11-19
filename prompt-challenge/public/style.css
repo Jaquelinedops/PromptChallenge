@@ -33,3 +33,68 @@
 .appeal-review{display:block}
 .appeal-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .appeal-conversation{margin-top:12px;max-height:400px;overflow:auto;white-space:pre-wrap;padding:12px;border:1px solid rgba(160,160,180,.3);border-radius:8px}
+
+/* Histórico de conversas aprovadas no painel administrativo */
+.victory-entry{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;justify-content:space-between}
+.victory-details{flex:1;min-width:210px}
+.victory-conversation{flex-basis:100%;min-width:0;border-top:1px solid var(--line,#ccc);padding-top:14px;display:flex;flex-direction:column;gap:8px}
+.victory-conversation .bubble{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;align-self:flex-start}
+.victory-conversation .bubble.user{align-self:flex-end}
+.victory-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:16px}
+
+/* v4.9: layout fluido e acessível em celular, tablet e desktop */
+html{overflow-x:hidden;-webkit-text-size-adjust:100%}
+body{min-width:0;overflow-x:hidden}
+.site-header{gap:12px;flex-wrap:wrap}
+.site-header>*{min-width:0}
+#identity{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px;max-width:100%}
+main,.card,.admin-panel,.game-layout,.game-layout>*,.auth-shell>*{min-width:0}
+.admin-tabs{scrollbar-width:thin;overscroll-behavior-x:contain;scroll-snap-type:x proximity}
+.admin-tabs button{scroll-snap-align:start;min-height:44px}
+.entry>*,.victory-details,.entry>div:first-child{min-width:0;overflow-wrap:anywhere}
+.entry button,.diagnostic-actions button,.victory-entry button{max-width:100%}
+.entry-list,.victory-entry{min-width:0}
+.victory-entry{align-items:flex-start;flex-wrap:wrap}
+.victory-entry>.victory-details{flex:1 1 250px}
+.victory-conversation{width:100%;max-height:min(70vh,780px);overflow-y:auto;overscroll-behavior:contain}
+.victory-pagination{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap}
+.victory-pagination button{min-height:44px}
+.messages{min-height:250px;max-height:min(58vh,650px);overscroll-behavior:contain}
+textarea,input,select{max-width:100%}
+button{touch-action:manipulation}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+@media(min-width:1500px){main{max-width:1480px}.site-header{padding-inline:max(28px,calc((100vw - 1480px)/2))}.game-layout{grid-template-columns:minmax(290px,380px) minmax(0,1fr)}.messages{max-height:65vh}}
+@media(max-width:850px){.entry{align-items:flex-start}.auth-shell{min-height:0}.mission-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr))}}
+@media(max-width:600px){
+ .site-header{padding:12px 14px}.site-header .brand{font-size:12px}
+ #identity{width:100%;justify-content:flex-start}
+ main{padding:20px 12px 65px}
+ h1{font-size:clamp(26px,8vw,39px)}h2{font-size:clamp(20px,6vw,25px)}
+ .hero h1{font-size:clamp(34px,10vw,46px)}
+ .hero-chips{margin:16px 0}
+ .card{padding:16px;border-radius:14px}.chat-card{padding:0}
+ .entry{flex-direction:column;align-items:stretch;gap:10px}
+ .entry>div:last-child{width:100%;justify-content:flex-start}
+ .entry button{min-height:44px}
+ .victory-entry>.victory-details{flex-basis:100%}
+ .victory-entry>button{width:100%}
+ .game-top{align-items:flex-start}.game-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+ .game-actions #sessionInfo{grid-column:1/-1;overflow-wrap:anywhere}
+ .game-actions button{padding:10px 6px;min-height:44px}
+ .mission-card{position:static}
+ .chat-header{padding:12px 14px}.messages{padding:12px;min-height:220px;max-height:48vh}
+ .bubble{max-width:96%;padding:11px 12px;font-size:14px}
+ #chatForm{padding:12px;gap:8px;flex-wrap:wrap}
+ #chatForm textarea{flex-basis:100%;min-height:70px;font-size:16px}
+ #chatForm button{width:100%;min-height:44px}
+ .admin-tabs{margin-inline:-4px;padding-inline:4px}
+ .admin-panel{padding:15px}.panel-title{gap:12px}
+ .panel-title>button{width:100%;min-height:44px}
+ .victory-pagination{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+ #victoriesPage{grid-column:1/-1;grid-row:1;text-align:center}
+ .diagnostic-grid{grid-template-columns:minmax(0,1fr)}
+ .diagnostic-actions button{flex:1 1 140px}
+ .three,.two{grid-template-columns:minmax(0,1fr)}
+ .hero-terminal{display:none}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}

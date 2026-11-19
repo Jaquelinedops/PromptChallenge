@@ -162,3 +162,7 @@ Após uma avaliação não aprovada, o participante pode clicar em **Solicitar r
 - O campo curto e botão **Solicitar revisão** aparecem exclusivamente abaixo do resultado negativo do juiz, na tentativa ativa. A decisão do administrador é humana (aprovar = vitória; reprovar = resultado original).
 - No catálogo, **Fazer novamente** aparece apenas para desafios concluídos e com replay disponível conforme `replay_enabled` e `max_replays` no banco. Vitórias anteriores são mantidas.
 - **Limpar histórico** mantém a jogada, zera o identificador de conversa no backend e limpa o chat da tela, sem usar uma repetição.
+
+### Painel administrativo — Conversas vencedoras
+
+A aba **Conversas vencedoras** apresenta as jogadas aprovadas pelo juiz (`attempts.result=true`) ou pelo administrador no fluxo de contestação (`judgment_appeals.status='approved'`). Permite abrir o histórico completo salvo no Neon, identifica a origem da aprovação e oferece paginação de 30 jogadas por página. A rota `GET /api/admin/victories?page=0` exige sessão de administrador aprovado. Não é necessária migração adicional além da `05_appeals_and_progress.sql`.

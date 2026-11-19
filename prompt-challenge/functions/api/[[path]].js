@@ -19,12 +19,41 @@ async function verifyPassword(password, stored) {
  let diff=a.length^b.length; for(let i=0;i<Math.max(a.length,b.length);i++) diff|=(a[i]||0)^(b[i]||0);
  return diff===0;
 }
-function cookie(request) { return /(?:^|;\s*)pc_session=([^;]+)/.exec(request.headers.get('Cookie')||'')?.[1]||null; }
-function sessionCookie(token,maxAge) {return `pc_session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`;}
+// __Secure- prefix: the browser rejects this cookie unless it is Secure (cannot be planted over HTTP).
+// __Host- is not usable: the app lives under cyberactivity.com.br/promptchallenge and the router Worker
+// rewrites Path=/ to Path=/promptchallenge/ so the session is never sent to the rest of the site.
+const SESSION_COOKIE='__Secure-pc_session';
+function cookie(request) { return /(?:^|;\s*)__Secure-pc_session=([^;]+)/.exec(request.headers.get('Cookie')||'')?.[1]||null; }
+function sessionCookie(token,maxAge) {return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`;}
+// 6: dummy hash in valid format, so a login for an unknown e-mail still runs PBKDF2 (no timing oracle).
+const DUMMY_PASSWORD_HASH=`pbkdf2$100000$${'0'.repeat(32)}$${'0'.repeat(64)}`;
+// 5: requests must come through the router Worker, which signs the real client IP.
+// Direct calls to *.pages.dev (production or preview) are rejected. ALLOW_DIRECT_ACCESS=true only for local dev.
+async function trustedClientIp(request,env,url){
+ if(env.ALLOW_DIRECT_ACCESS==='true')return request.headers.get('CF-Connecting-IP')||'local';
+ const secret=env.PROXY_SHARED_SECRET;if(!secret||secret.length<32)return null;
+ const ip=request.headers.get('X-PC-Client-IP')||'',ts=request.headers.get('X-PC-Timestamp')||'',sig=request.headers.get('X-PC-Signature')||'';
+ if(!ip||ip.length>64||!/^[0-9a-fA-F:.]+$/.test(ip)||!/^\d{10}$/.test(ts)||!/^[0-9a-f]{64}$/.test(sig))return null;
+ if(Math.abs(Math.floor(Date.now()/1000)-Number(ts))>60)return null;
+ const key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['verify']);
+ const sigBytes=new Uint8Array(sig.match(/../g).map(x=>parseInt(x,16)));
+ const ok=await crypto.subtle.verify('HMAC',key,sigBytes,encoder.encode(`${ts}\n${ip}\n${request.method}\n${url.pathname}`));
+ return ok?ip:null;
+}
+// 2: time limit with 'block' policy is enforced here, using the database clock.
+async function timeExpired(sql,userId,ch){
+ if(ch.time_limit_policy!=='block'||!Number.isInteger(ch.time_limit_minutes)||ch.time_limit_minutes<1)return false;
+ const rows=await sql`SELECT (run_started_at IS NOT NULL AND run_started_at+(${ch.time_limit_minutes} * interval '1 minute')<=now()) AS expired FROM progress WHERE user_id=${userId} AND challenge_id=${ch.id}`;
+ return !!rows[0]?.expired;
+}
 function stripPrivate(s) {
- return String(s||'').replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi,'')
-  .replace(/<details\b[^>]*>\s*<summary[^>]*>\s*(?:thinking|pensamento)[\s\S]*?<\/details>/gi,'')
-  .replace(/<\|im_start\|>(?:system|developer|assistant<\|meta_sep\|>analysis)[\s\S]*?<\|im_end\|>/g,'')
+ // Bound the input BEFORE any regex. Tag attributes are length-limited and every block
+ // either ends at its closing tag or at end of text, so each match consumes its text (no quadratic rescans).
+ // An unclosed block (e.g. "<think>" without "</think>") is removed until the end of the answer.
+ return String(s||'').slice(0,40000)
+  .replace(/<think\b[^>]{0,200}>[\s\S]*?(?:<\/think>|$)/gi,'')
+  .replace(/<details\b[^>]{0,200}>\s*<summary[^>]{0,200}>\s*(?:thinking|pensamento)[\s\S]*?(?:<\/details>|$)/gi,'')
+  .replace(/<\|im_start\|>(?:system|developer|assistant<\|meta_sep\|>analysis)[\s\S]*?(?:<\|im_end\|>|$)/g,'')
   .slice(0,30000).trim();
 }
 async function currentUser(sql,request) {
@@ -82,18 +111,19 @@ async function state(sql,user){
  if(!lease||lease.scenario_id!==current.scenario_id)return {sessionRequired:true,selectionRequired:false,catalogue,challenge,messages:[]};
  const messages=await sql`SELECT role,content,id FROM messages WHERE user_id=${user.id} AND challenge_id=${current.id} AND run_no=${p.run_no} AND generation=${p.generation} ORDER BY id DESC LIMIT 120`;
  const count=await sql`SELECT count(*)::int AS prompt_count FROM messages WHERE user_id=${user.id} AND challenge_id=${current.id} AND run_no=${p.run_no} AND role='user'`;
- const lastJudgment=messages.length?await sql`SELECT id,result,feedback FROM attempts WHERE user_id=${user.id} AND challenge_id=${current.id} AND run_no=${p.run_no} ORDER BY id DESC LIMIT 1`:[];
+ const lastJudgment=messages.length?await sql`SELECT id,result FROM attempts WHERE user_id=${user.id} AND challenge_id=${current.id} AND run_no=${p.run_no} ORDER BY id DESC LIMIT 1`:[];
  const pendingAppeals=await sql`SELECT id,attempt_id,status,admin_note FROM judgment_appeals WHERE user_id=${user.id} AND challenge_id=${current.id} AND run_no=${p.run_no} ORDER BY id DESC`;
  return {catalogue,challenge,messages:messages.reverse(),prompt_count:count[0].prompt_count,interface:lease.label,expires_at:lease.expires_at,lastJudgment:lastJudgment[0]||null,appeals:pendingAppeals};
 }
-async function reviewRun(sql,user,challengeId,runNo){
+async function reviewRun(sql,user,challengeId,runNo,includeFeedback=false){
  const ch=await sql`SELECT c.id,c.title,c.description,c.hint,c.position,c.replay_enabled,c.max_replays,c.time_limit_minutes,c.time_limit_policy,s.title AS scenario_title,p.run_no AS current_run,p.ever_passed,p.run_started_at FROM challenges c JOIN scenarios s ON s.id=c.scenario_id JOIN progress p ON p.challenge_id=c.id AND p.user_id=${user.id} WHERE c.id=${challengeId}`;
  if(!ch.length)return null;
  const c=ch[0],n=runNo||c.current_run;
  const runs=await sql`SELECT run_no,started_at,completed_at,won,prompt_count FROM challenge_runs WHERE user_id=${user.id} AND challenge_id=${challengeId} ORDER BY run_no`;
  if(!runs.some(x=>x.run_no===n))return null;
  const messages=await sql`SELECT id,role,content,created_at FROM messages WHERE user_id=${user.id} AND challenge_id=${challengeId} AND run_no=${n} ORDER BY id LIMIT 500`;
- const attempts=await sql`SELECT id,result,feedback,created_at,prompt_count FROM attempts WHERE user_id=${user.id} AND challenge_id=${challengeId} AND run_no=${n} ORDER BY id`;
+ // Judge feedback stays in the database; only administrators receive it.
+ const attempts=includeFeedback?await sql`SELECT id,result,feedback,created_at,prompt_count FROM attempts WHERE user_id=${user.id} AND challenge_id=${challengeId} AND run_no=${n} ORDER BY id`:await sql`SELECT id,result,created_at,prompt_count FROM attempts WHERE user_id=${user.id} AND challenge_id=${challengeId} AND run_no=${n} ORDER BY id`;
  const appeals=await sql`SELECT id,attempt_id,status,reason,admin_note,created_at,decided_at FROM judgment_appeals WHERE user_id=${user.id} AND challenge_id=${challengeId} AND run_no=${n} ORDER BY id`;
  return {challenge:c,run_no:n,runs,messages,attempts,appeals,can_replay:c.ever_passed&&c.replay_enabled&&(c.current_run-1)<c.max_replays};
 }
@@ -133,16 +163,17 @@ async function judgeSettings(sql,scenarioId){const rows=await sql`SELECT coalesc
 export async function onRequest(context) {
  const {request,env}=context;
  const url=new URL(request.url), path=url.pathname.slice(5),method=request.method;
+ const clientIp=await trustedClientIp(request,env,url);if(!clientIp)return fail('Rota não encontrada',404);
  const allowed=['GET','POST'];if(!allowed.includes(method))return fail('Método não permitido',405);
  if(method==='POST'){
   const origin=request.headers.get('Origin');
-  if(!origin||![url.origin,'https://cyberactivity.com.br'].includes(origin)) return fail('Origem inválida',403);
+  if(!origin||origin!==url.origin) return fail('Origem inválida',403);
   if(!request.headers.get('Content-Type')?.startsWith('application/json')) return fail('Tipo de conteúdo inválido',415);
  }
  if(!env.DATABASE_URL)return fail('Banco não configurado',503);
  const sql=neon(env.DATABASE_URL);
  try {
-  const ip=request.headers.get('CF-Connecting-IP')||'unknown';
+  const ip=clientIp;
   if(path==='register'&&method==='POST'){
    if(!await throttle(sql,'reg:'+ip,5,3600))return fail('Limite de cadastros excedido',429);
    const {name,email,password}=await input(request);
@@ -155,9 +186,13 @@ export async function onRequest(context) {
   if(path==='login'&&method==='POST'){
    if(!await throttle(sql,'login:'+ip,12,600))return fail('Muitas tentativas. Tente mais tarde.',429);
    const {email,password}=await input(request);
-   if(typeof email!=='string'||typeof password!=='string')return fail('Credenciais inválidas',401);
-   const rows=await sql`SELECT * FROM users WHERE email=${email.trim().toLowerCase()}`;
-   if(!rows.length||!await verifyPassword(password,rows[0].password_hash)) return fail('Credenciais inválidas',401);
+   if(typeof email!=='string'||typeof password!=='string'||email.length>254||password.length>128)return fail('Credenciais inválidas',401);
+   const normalizedEmail=email.trim().toLowerCase();
+   // Per-account limit (independent of IP), applied to existing and non-existing e-mails alike.
+   if(!await throttle(sql,'login-acct:'+await hash(normalizedEmail),10,900))return fail('Muitas tentativas. Tente mais tarde.',429);
+   const rows=await sql`SELECT * FROM users WHERE email=${normalizedEmail}`;
+   const passwordOk=await verifyPassword(password,rows[0]?.password_hash||DUMMY_PASSWORD_HASH);
+   if(!rows.length||!passwordOk) return fail('Credenciais inválidas',401);
    const u=rows[0];if(u.status!=='approved') return fail('Conta ainda não aprovada',403);
    const token=toHex(crypto.getRandomValues(new Uint8Array(32)));
    await sql`INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(${await hash(token)},${u.id},now()+interval '12 hours')`;
@@ -196,7 +231,8 @@ export async function onRequest(context) {
     const reviewUserId=url.searchParams.get('user_id');
     if(reviewUserId&&(!validId(reviewUserId)||user.role!=='admin'))return fail('Acesso negado',403);
     if(!validId(cid)||!Number.isInteger(run)||run<0||run>10000)return fail('Parâmetros inválidos');
-    const review=await reviewRun(sql,reviewUserId?{id:reviewUserId}:user,cid,run);if(!review)return fail('Histórico não encontrado',404);
+    if(!await throttle(sql,'review:'+user.id,90,60))return fail('Limite de consultas ao histórico excedido',429);
+    const review=await reviewRun(sql,reviewUserId?{id:reviewUserId}:user,cid,run,user.role==='admin');if(!review)return fail('Histórico não encontrado',404);
     return json(review);
    }
    if(path==='appeals'&&method==='POST'){
@@ -238,6 +274,7 @@ export async function onRequest(context) {
    if(path==='chat'&&method==='POST'){
     const current=await selected(sql,user),assigned=await leasePool(sql,user.id);
     if(!current||!assigned||assigned.lease.scenario_id!==current.scenario_id)return fail('Selecione um desafio e inicie a sessão correspondente',409);
+    if(await timeExpired(sql,user.id,current))return fail('Tempo do desafio encerrado',403);
     if(!await throttle(sql,'chat:'+user.id,20,60))return fail('Limite de mensagens por minuto',429);
     const {text}=await input(request);if(typeof text!=='string'||!text.trim()||text.length>6000)return fail('Mensagem inválida');
     const progress=await sql`SELECT generation,conversation_id FROM progress WHERE user_id=${user.id} AND challenge_id=${current.id} AND status='active'`;
@@ -247,7 +284,8 @@ export async function onRequest(context) {
     const claim=await sql`SELECT pc_begin_operation(${user.id},${current.id},${progress[0].generation},${assigned.lease.lease_id}) AS token`;
     const token=claim[0]?.token;if(!token)return fail('Outra operação está em andamento',409);
     try{
-     const reply=await queryDify(env,assigned.pool,text.trim(),progress[0].conversation_id,`${assigned.lease.lease_id}:${user.id}`);
+     const difyUser='pc_'+(await hash(`${assigned.lease.lease_id}:${user.id}`)).slice(0,32);
+     const reply=await queryDify(env,assigned.pool,text.trim(),progress[0].conversation_id,difyUser);
      if(reply.reset){await sql`SELECT pc_cancel_operation(${user.id},${current.id},${token},true)`;return json({reset:true,message:'Conversa encerrada. Uma nova conversa foi iniciada.'})}
      const done=await sql`SELECT pc_finish_chat(${user.id},${current.id},${progress[0].generation},${token},${assigned.lease.lease_id},${reply.conversation_id},${text.trim()},${reply.text}) AS ok`;
      if(!done[0].ok)return fail('Sessão ou desafio mudou durante a resposta',409);
@@ -263,12 +301,14 @@ export async function onRequest(context) {
    if(path==='submit'&&method==='POST'){
     const ch=await selected(sql,user),assigned=await leasePool(sql,user.id);
     if(!ch||!assigned||assigned.lease.scenario_id!==ch.scenario_id)return fail('Sessão do desafio não iniciada',409);
+    if(await timeExpired(sql,user.id,ch))return fail('Tempo do desafio encerrado',403);
     const settings=await judgeSettings(sql,ch.scenario_id);
-    const progress=await sql`SELECT generation FROM progress WHERE user_id=${user.id} AND challenge_id=${ch.id} AND status='active'`;
+    const progress=await sql`SELECT generation,run_no FROM progress WHERE user_id=${user.id} AND challenge_id=${ch.id} AND status='active'`;
     if(!progress.length)return fail('Desafio já concluído',409);
-    const last=await sql`SELECT id,content FROM messages WHERE user_id=${user.id} AND challenge_id=${ch.id} AND generation=${progress[0].generation} AND role='assistant' ORDER BY id DESC LIMIT 1`;
+    // Only messages from the current run AND generation can be judged (never a previous run's answer).
+    const last=await sql`SELECT id,content FROM messages WHERE user_id=${user.id} AND challenge_id=${ch.id} AND run_no=${progress[0].run_no} AND generation=${progress[0].generation} AND role='assistant' ORDER BY id DESC LIMIT 1`;
     if(!last.length)return fail('Envie uma mensagem antes de submeter');
-    const prev=await sql`SELECT content FROM messages WHERE user_id=${user.id} AND challenge_id=${ch.id} AND generation=${progress[0].generation} AND role='user' AND id<${last[0].id} ORDER BY id DESC LIMIT 1`;
+    const prev=await sql`SELECT content FROM messages WHERE user_id=${user.id} AND challenge_id=${ch.id} AND run_no=${progress[0].run_no} AND generation=${progress[0].generation} AND role='user' AND id<${last[0].id} ORDER BY id DESC LIMIT 1`;
     const claim=await sql`SELECT pc_begin_operation(${user.id},${ch.id},${progress[0].generation},${assigned.lease.lease_id}) AS token`;
     const token=claim[0]?.token;if(!token)return fail('Outra operação está em andamento',409);
     let result;
@@ -280,10 +320,47 @@ export async function onRequest(context) {
     const prompts=await sql`SELECT count(*)::int AS n FROM messages WHERE user_id=${user.id} AND challenge_id=${ch.id} AND run_no=(SELECT run_no FROM progress WHERE user_id=${user.id} AND challenge_id=${ch.id}) AND role='user'`;
     const replayInfo=await sql`SELECT c.replay_enabled,c.max_replays,p.run_no FROM challenges c JOIN progress p ON p.challenge_id=c.id WHERE c.id=${ch.id} AND p.user_id=${user.id}`;
     const finalAttempt=await sql`SELECT id FROM attempts WHERE user_id=${user.id} AND challenge_id=${ch.id} AND run_no=${replayInfo[0].run_no} ORDER BY id DESC LIMIT 1`;
-    return json({...result,attempt_id:finalAttempt[0]?.id,prompt_count:prompts[0].n,replay_allowed:!!(result.won&&replayInfo[0]?.replay_enabled&&(replayInfo[0].run_no-1)<replayInfo[0].max_replays)});
+    return json({won:result.won,attempt_id:finalAttempt[0]?.id,prompt_count:prompts[0].n,replay_allowed:!!(result.won&&replayInfo[0]?.replay_enabled&&(replayInfo[0].run_no-1)<replayInfo[0].max_replays)});
    }
   if(user.role!=='admin')return fail('Acesso negado',403);
   if(path==='admin/ui'&&method==='GET')return json({markup:ADMIN_MARKUP});
+  if(path==='admin/victories'&&method==='GET'){
+   const pageRaw=url.searchParams.get('page')||'0';
+   if(!/^(0|[1-9]\d{0,5})$/.test(pageRaw))return fail('Página inválida');
+   const page=Number(pageRaw),limit=30;
+   if(page>1000)return fail('Limite de paginação excedido',400);
+   if(!await throttle(sql,'victories:'+user.id,60,60))return fail('Muitas consultas às vitórias',429);
+   // A aprovação administrativa não altera attempts.result: consultar ambas as origens.
+   // DISTINCT ON garante uma conversa por jogada, mesmo se houver múltiplas avaliações.
+   const rows=await sql`
+     WITH wins AS (
+       SELECT a.user_id,a.challenge_id,a.run_no,'judge'::text AS source,
+              a.created_at AS approved_at,a.feedback AS verdict,NULL::text AS admin_note
+       FROM attempts a WHERE a.result=true
+       UNION ALL
+       SELECT ap.user_id,ap.challenge_id,ap.run_no,'admin'::text AS source,
+              ap.decided_at AS approved_at,a.feedback AS verdict,ap.admin_note
+       FROM judgment_appeals ap
+       JOIN attempts a ON a.id::text=ap.attempt_id AND a.user_id=ap.user_id
+         AND a.challenge_id=ap.challenge_id AND a.run_no=ap.run_no
+       WHERE ap.status='approved'
+     ), unique_wins AS (
+       SELECT DISTINCT ON (user_id,challenge_id,run_no)
+         user_id,challenge_id,run_no,source,approved_at,verdict,admin_note
+       FROM wins ORDER BY user_id,challenge_id,run_no,
+         CASE WHEN source='admin' THEN 0 ELSE 1 END,approved_at DESC
+     )
+     SELECT w.*,u.name AS player_name,u.email AS player_email,
+       c.title AS challenge_title,s.title AS scenario_title,
+       (SELECT count(*)::int FROM messages m WHERE m.user_id=w.user_id
+         AND m.challenge_id=w.challenge_id AND m.run_no=w.run_no AND m.role='user') AS prompt_count
+     FROM unique_wins w
+     JOIN users u ON u.id=w.user_id JOIN challenges c ON c.id=w.challenge_id
+     JOIN scenarios s ON s.id=c.scenario_id
+     ORDER BY w.approved_at DESC NULLS LAST,w.user_id,w.challenge_id,w.run_no
+     LIMIT ${limit+1} OFFSET ${page*limit}`;
+   return json({victories:rows.slice(0,limit),page,has_more:rows.length>limit});
+  }
   if(path==='admin/appeals'&&method==='GET'){
    const rows=await sql`SELECT ap.id,ap.user_id,ap.challenge_id,ap.attempt_id,ap.run_no,ap.status,ap.reason,ap.admin_note,ap.created_at,ap.decided_at,u.name AS player_name,u.email AS player_email,c.title AS challenge_title,a.feedback AS judge_feedback,a.result AS judge_result FROM judgment_appeals ap JOIN users u ON u.id=ap.user_id JOIN challenges c ON c.id=ap.challenge_id JOIN attempts a ON a.id::text=ap.attempt_id AND a.user_id=ap.user_id WHERE ap.status='pending' ORDER BY ap.created_at ASC LIMIT 200`;
    return json({appeals:rows});
