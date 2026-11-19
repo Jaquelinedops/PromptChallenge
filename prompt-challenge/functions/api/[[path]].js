@@ -31,14 +31,19 @@ const DUMMY_PASSWORD_HASH=`pbkdf2$100000$${'0'.repeat(32)}$${'0'.repeat(64)}`;
 // Direct calls to *.pages.dev (production or preview) are rejected. ALLOW_DIRECT_ACCESS=true only for local dev.
 async function trustedClientIp(request,env,url){
  if(env.ALLOW_DIRECT_ACCESS==='true')return request.headers.get('CF-Connecting-IP')||'local';
- const secret=env.PROXY_SHARED_SECRET;if(!secret||secret.length<32)return null;
+ // Rejection reasons are logged (never returned to the client) to make deployment errors diagnosable.
+ const deny=reason=>{console.error('Proxy check failed:',reason,request.method,url.hostname+url.pathname);return null};
+ const secret=env.PROXY_SHARED_SECRET;
+ if(!secret)return deny('PROXY_SHARED_SECRET ausente no projeto Pages (configure e faça novo deploy)');
+ if(secret.length<32)return deny('PROXY_SHARED_SECRET com menos de 32 caracteres');
  const ip=request.headers.get('X-PC-Client-IP')||'',ts=request.headers.get('X-PC-Timestamp')||'',sig=request.headers.get('X-PC-Signature')||'';
- if(!ip||ip.length>64||!/^[0-9a-fA-F:.]+$/.test(ip)||!/^\d{10}$/.test(ts)||!/^[0-9a-f]{64}$/.test(sig))return null;
- if(Math.abs(Math.floor(Date.now()/1000)-Number(ts))>60)return null;
+ if(!ip&&!ts&&!sig)return deny('requisição sem cabeçalhos do Worker (acesso direto ao pages.dev ou Worker antigo)');
+ if(!ip||ip.length>64||!/^[0-9a-fA-F:.]+$/.test(ip)||!/^\d{10}$/.test(ts)||!/^[0-9a-f]{64}$/.test(sig))return deny('cabeçalhos do Worker malformados');
+ if(Math.abs(Math.floor(Date.now()/1000)-Number(ts))>60)return deny('assinatura expirada (>60 s)');
  const key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['verify']);
  const sigBytes=new Uint8Array(sig.match(/../g).map(x=>parseInt(x,16)));
  const ok=await crypto.subtle.verify('HMAC',key,sigBytes,encoder.encode(`${ts}\n${ip}\n${request.method}\n${url.pathname}`));
- return ok?ip:null;
+ return ok?ip:deny('assinatura inválida (segredo diferente entre Worker e Pages)');
 }
 // 2: time limit with 'block' policy is enforced here, using the database clock.
 async function timeExpired(sql,userId,ch){
