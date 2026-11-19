@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const ui={me:null,register:false,busy:false,admin:null,state:null,chosenTab:'diagnostics',reviewing:false,activeChallengeId:null,timerEnd:null,timerPolicy:'warn',appealAttemptId:null};
+const ui={me:null,register:false,busy:false,admin:null,state:null,chosenTab:'diagnostics',reviewing:false,activeChallengeId:null,timerEnd:null,timerPolicy:'warn',appealAttemptId:null,hasWon:false,canReplayNow:false};
 const text=(node,value)=>{node.textContent=String(value??'');return node};
 const el=(tag,className='',value='')=>{const n=document.createElement(tag);if(className)n.className=className;if(value!==undefined)text(n,value);return n};
 const show=(id,yes)=>{$(id).hidden=!yes};
@@ -21,13 +21,6 @@ function renderCatalogue(challenges){
   btn.disabled=!c.unlocked&&!c.passed;
   btn.onclick=async()=>{try{if(c.passed&&!c.currently_active){await openReview(c.id);return}await api('select','POST',{challenge_id:c.id});await refresh()}catch(e){notify(e.message)}};
   item.append(btn);
-  // A revisão permanece acessível mesmo após reiniciar a conversa ou encerrar a sessão.
-  if(c.has_judgments){
-   const review=el('button','ghost','Avaliações e pedidos de revisão');
-   review.type='button';
-   review.onclick=()=>openReview(c.id).catch(e=>notify(e.message));
-   item.append(review);
-  }
   node.append(item);
  }
 }
@@ -45,8 +38,8 @@ function updateTimer(){
  if(seconds===0&&ui.timerPolicy==='block'){ $('send').disabled=true;$('submit').disabled=true }
 }
 setInterval(updateTimer,1000);
-function setChatLocked(locked){$('query').disabled=locked;$('send').disabled=locked;$('submit').disabled=locked;$('reset').disabled=locked}
-function showWinActions(show,allowReplay=false){$('victoryActions').hidden=!show;$('replayCurrent').hidden=!allowReplay}
+function setChatLocked(locked){$('query').disabled=locked;$('send').disabled=locked;$('submit').disabled=locked}
+function showWinActions(show,allowReplay=false){$('victoryActions').hidden=!show;ui.hasWon=show;ui.canReplayNow=!!allowReplay;$('reset').hidden=show&&!allowReplay;$('reset').disabled=false}
 function fillMessages(messages){$('messages').replaceChildren();if(!(messages||[]).length)$('messages').append(el('div','empty','◈ Nenhuma mensagem nesta execução.'));else for(const m of messages)$('messages').append(bubble(m.role,m.content));$('messages').scrollTop=$('messages').scrollHeight}
 function renderChallenge(ch){text($('progress'),ch.scenario_title+' · ETAPA '+ch.position+(ch.run_no?' · JOGADA '+ch.run_no:''));text($('challengeTitle'),ch.title);text($('description'),ch.description);text($('hint'),ch.hint);ui.activeChallengeId=ch.id;timerUI(ch)}
 async function openReview(challengeId,runNo=0){
@@ -58,10 +51,10 @@ async function openReview(challengeId,runNo=0){
  const history=$('reviewHistory');history.hidden=false;history.replaceChildren();for(const runItem of r.runs){const b=el('button','ghost',`Jogada ${runItem.run_no} · ${runItem.prompt_count} prompts${runItem.won?' · ✓':''}`);b.disabled=runItem.run_no===r.run_no;b.onclick=()=>openReview(challengeId,runItem.run_no).catch(e=>notify(e.message));history.append(b)}
  const last=r.attempts.at(-1);const won=!!run?.won;
  $('result').className=won?'status-good':'status-bad';text($('result'),won?'✓ Desafio concluído. Resultado preservado no Neon.':last?`Último julgamento: ${last.result?'Aprovado':'Não aprovado'} · ${last.feedback}`:'Histórico de execução');
- setChatLocked(true);showWinActions(true,r.can_replay);$('reviewCurrent').hidden=true;
+ setChatLocked(true);showWinActions(won,r.can_replay&&won);$('reviewCurrent').hidden=true;
  const latestAppeal=last?r.appeals?.filter(x=>String(x.attempt_id)===String(last.id)):[];
- configureAppeal(won||last?.result?null:last?.id,latestAppeal||[]);
- $('replayCurrent').onclick=()=>replayChallenge(challengeId);
+ configureAppeal(won||r.challenge.ever_passed||last?.result?null:last?.id,latestAppeal||[]);
+
 }
 async function replayChallenge(challengeId){
  if(!confirm('Iniciar outra jogada? A conquista anterior continuará salva.'))return;
@@ -77,30 +70,37 @@ async function refresh(){try{const state=await api('state');ui.state=state;rende
  fillMessages(state.messages);text($('promptCounter'),'Prompts enviados nesta jogada: '+(state.prompt_count||0));
  text($('result'),'');$('result').className='';setChatLocked(false);updateTimer();
     const last=state.lastJudgment;
-    if(last){$('result').className=last.result?'status-good':'status-bad';text($('result'),last.result?'✓ Desafio concluído.':'Último julgamento: não aprovado. '+(last.feedback||''))}
+    if(last){$('result').className=last.result?'status-good':'status-bad';text($('result'),last.result?'✓ Desafio concluído.':'Último julgamento: não aprovado. '+(last.feedback||''));if(last.result){showWinActions(true,!!state.catalogue?.find(c=>c.id===state.challenge.id)?.replay_allowed);setChatLocked(true)}}
     configureAppeal(last?.result?null:last?.id,state.appeals||[]);
  }catch(e){notify(e.message)}}
 async function choose(){show('chooser',true);show('activity',false);show('game',false);try{const {challenges}=await api('catalogue');if(ui.state)ui.state.catalogue=challenges;renderCatalogue(challenges)}catch(e){notify(e.message);renderCatalogue(ui.state?.catalogue||[])}}
 $('changeChallenge').onclick=choose;$('returnChooser').onclick=choose;
-$('reviewJudgments').onclick=()=>{if(!ui.activeChallengeId)return notify('Selecione um desafio para revisar.');openReview(ui.activeChallengeId).catch(e=>notify(e.message))};
 $('activate').onclick=async()=>{try{$('activate').disabled=true;const r=await api('activate','POST',{});notify('Sessão iniciada. Boa sorte!');await refresh()}catch(e){notify(e.message)}finally{$('activate').disabled=false}};
 $('chatForm').onsubmit=async event=>{event.preventDefault();if(ui.busy)return;const query=$('query').value.trim();if(!query)return;ui.busy=true;$('send').disabled=true;const messages=$('messages');messages.querySelector('.empty')?.remove();messages.append(bubble('user',query));$('query').value='';const loading=bubble('assistant','Consultando o assistente...');messages.append(loading);messages.scrollTop=messages.scrollHeight;try{const result=await api('chat','POST',{text:query});if(result.reset){notify(result.message);await refresh()}else {text(loading,result.answer||'(Resposta vazia)');if(result.prompt_count!==undefined)text($('promptCounter'),'Prompts enviados nesta jogada: '+result.prompt_count)}}catch(e){notify(e.message);await refresh()}finally{ui.busy=false;$('send').disabled=false}};
 $('submit').onclick=async()=>{if(ui.busy)return;ui.busy=true;$('submit').disabled=true;try{const r=await api('submit','POST',{});$('result').className=r.won?'status-good':'status-bad';text($('result'),(r.won?'✓ Desafio vencido. ':'✕ Ainda não. ')+(r.reason||''));if(r.prompt_count!==undefined)text($('promptCounter'),'Prompts enviados nesta jogada: '+r.prompt_count);configureAppeal(r.won?null:r.attempt_id,[]);if(r.won){notify('Conquista registrada! A conversa permanece disponível.');setChatLocked(true);showWinActions(true,!!r.replay_allowed)}}catch(e){notify(e.message)}finally{ui.busy=false;$('submit').disabled=false}};
 function configureAppeal(attemptId,appeals=[]){
  ui.appealAttemptId=attemptId||null;
- const box=$('appealBox'),form=$('appealForm'),status=$('appealStatus');form.hidden=true;
- const existing=(appeals||[]).find(x=>String(x.attempt_id)===String(attemptId))||(appeals||[]).find(x=>x.status==='pending'||x.status==='approved'||x.status==='rejected');
+ const box=$('appealBox'),form=$('appealForm'),status=$('appealStatus');
+ const existing=(appeals||[]).find(x=>String(x.attempt_id)===String(attemptId))||(appeals||[]).find(x=>['pending','approved','rejected'].includes(x.status));
  box.hidden=!attemptId&&!existing;
- $('appealToggle').hidden=!attemptId||!!existing;
+ form.hidden=!attemptId||!!existing;
+ if(!form.hidden) $('appealReason').value='';
  text(status,existing?existing.status==='pending'?'Revisão solicitada. Aguardando decisão da administração.':existing.status==='approved'?'Revisão aprovada pela administração.':'Revisão reprovada pela administração. '+(existing.admin_note||''):'');
 }
-$('appealToggle').onclick=()=>{$('appealForm').hidden=!$('appealForm').hidden};
-$('appealForm').onsubmit=async e=>{e.preventDefault();if(!ui.appealAttemptId)return;const button=e.currentTarget.querySelector('button[type=submit]');button.disabled=true;try{await api('appeals','POST',{attempt_id:String(ui.appealAttemptId),reason:$('appealReason').value.trim()});notify('Pedido de revisão encaminhado à administração.');configureAppeal(ui.appealAttemptId,[{attempt_id:ui.appealAttemptId,status:'pending'}])}catch(err){notify(err.message)}finally{button.disabled=false}};
+$('appealForm').onsubmit=async e=>{e.preventDefault();if(!ui.appealAttemptId)return;const reason=$('appealReason').value.trim();if(reason.length<15||reason.length>500)return notify('Escreva uma justificativa de 15 a 500 caracteres.');const button=e.currentTarget.querySelector('button[type=submit]');button.disabled=true;try{await api('appeals','POST',{attempt_id:String(ui.appealAttemptId),reason});notify('Pedido de revisão encaminhado à administração.');configureAppeal(ui.appealAttemptId,[{attempt_id:ui.appealAttemptId,status:'pending'}])}catch(err){notify(err.message)}finally{button.disabled=false}};
 $('reviewCurrent').onclick=async()=>{try{await openReview(ui.activeChallengeId)}catch(e){notify(e.message)}};
-$('replayCurrent').onclick=async()=>{try{await replayChallenge(ui.activeChallengeId)}catch(e){notify(e.message)}};
 $('nextMission').onclick=()=>{ui.reviewing=false;choose()};
-$('endActivity').onclick=async()=>{if(ui.busy||!confirm('Encerrar esta sessão e liberar sua vaga?'))return;try{await api('end-activity','POST',{});await refresh()}catch(e){notify(e.message)}};
-$('reset').onclick=async()=>{if(ui.busy||!confirm('Iniciar uma nova conversa? O histórico anterior ficará salvo.'))return;ui.busy=true;$('reset').disabled=true;try{await api('reset','POST',{});fillMessages([]);text($('result'),'');$('result').className='';show('appealBox',false);$('query').value='';await refresh();notify('Nova conversa iniciada.')}catch(e){notify(e.message)}finally{ui.busy=false;$('reset').disabled=false}};
+$('reset').onclick=async()=>{
+ if(ui.busy)return;
+ if(ui.hasWon){
+  if(!ui.canReplayNow)return;
+  await replayChallenge(ui.activeChallengeId);
+  return;
+ }
+ if(!confirm('Tentar novamente com uma conversa limpa? O histórico ficará salvo.'))return;
+ ui.busy=true;$('reset').disabled=true;
+ try{await api('reset','POST',{});fillMessages([]);text($('result'),'');$('result').className='';show('appealBox',false);$('query').value='';await refresh();notify('Conversa reiniciada.')}catch(e){notify(e.message)}finally{ui.busy=false;$('reset').disabled=false}
+};
 function option(select,id,label){const o=el('option','',label);o.value=id;select.append(o)}
 function fillSelect(id,items,placeholder=false){const target=$(id);target.replaceChildren();if(placeholder)option(target,'','Todos os cenários (padrão)');for(const item of items)option(target,item.id,item.title)}
 function getSelected(id){return [...$(id).selectedOptions].map(x=>x.value).filter(Boolean)}
