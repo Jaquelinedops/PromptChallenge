@@ -1,4 +1,4 @@
-# Prompt Challenge — cenários progressivos (v4)
+# Prompt Challenge — cenários progressivos (v3)
 
 Projeto para **Cloudflare Pages Functions + Neon PostgreSQL + Dify + Groq**. Esta versão foi preparada como atualização do ambiente anterior e **não foi testada com suas credenciais nem com o banco de produção**. Faça backup do Neon antes de executar a migração.
 
@@ -13,32 +13,7 @@ Projeto para **Cloudflare Pages Functions + Neon PostgreSQL + Dify + Groq**. Est
 - Novo visual neon/cyber, adaptável a celular; renderização do conteúdo do chat via `textContent` e CSP restritiva.
 - Tokens de operação efêmeros no Neon impedem duas chamadas concorrentes de chat/julgamento para a mesma missão de gravarem estado simultaneamente. Funções SQL de finalização validam sessão, geração e desafio selecionado.
 
-## Atualização v4 — revisão de veredicto e cota do juiz
-
-**O que muda**
-- **Pedido de revisão:** depois de uma reprovação, o participante pode clicar em *Pedir revisão ao administrador* e explicar por que discorda (opcional, até 1000 caracteres). O pedido aparece na aba **Administração → Revisões**, com o argumento, o último prompt, a resposta avaliada e o parecer do juiz. O admin aprova (o desafio fica concluído para a pessoa) ou recusa, com um comentário opcional que o participante vê.
-- **Cota antes do Groq:** a cota de avaliações é conferida *antes* de chamar o juiz. Há também um limite de chamadas ao juiz (2× o limite de avaliações, na mesma janela) que conta inclusive as chamadas que falham, para evitar uso ilimitado da API.
-- **Prompt do juiz reforçado:** prompt e resposta do participante vão em blocos delimitados por um código aleatório a cada chamada, e o juiz é instruído a tratá-los sempre como texto a avaliar, nunca como instruções, e a não revelar o critério no `reason`.
-
-**Regras de segurança da revisão (aplicadas no banco, em `pc_request_review` e `pc_decide_review`)**
-- Só o dono da tentativa pode pedir revisão, só de tentativas reprovadas pelo juiz, em até 24 h, e só se o desafio ainda não foi concluído.
-- Um pedido por tentativa, no máximo um pendente por desafio e 5 pedidos por hora por participante.
-- O texto mostrado ao admin é copiado pelo servidor da tabela `messages`. O navegador envia apenas o id da tentativa e o comentário.
-- O papel de admin é conferido de novo dentro da função SQL. O admin não decide o próprio pedido, e uma decisão nunca é sobrescrita: com dois admins ao mesmo tempo, só o primeiro vale.
-- A tentativa reprovada original não é alterada. Uma aprovação gera uma tentativa nova com `source='review'` e `review_id`, preservando a trilha de auditoria.
-
-**Como aplicar**
-1. Faça backup do Neon.
-2. Execute **apenas** `sql/04_judge_reviews.sql` no SQL Editor, uma vez. A migração é compatível com o backend v3 (as funções antigas continuam existindo), então pode ser aplicada antes do deploy.
-3. Faça o deploy do novo `public/` + `functions/`.
-4. Confira:
-   ```sql
-   SELECT count(*) FROM review_requests;
-   SELECT pc_judge_quota_ok(gen_random_uuid(), gen_random_uuid(), 8, 0); -- deve retornar true
-   ```
-Tentativas feitas antes da v4 não têm a referência da mensagem avaliada, por isso não podem ser revisadas.
-
-## Atualização de uma instalação EXISTENTE (v3)
+## Atualização de uma instalação EXISTENTE
 
 1. **Faça snapshot/backup do banco Neon** e mantenha uma cópia do projeto antigo para rollback.
 2. Confirme que o banco já recebeu `sql/schema.sql` e `sql/02_multi_interfaces.sql` anteriormente. **Não execute novamente `sample_challenges.sql`**.
@@ -59,7 +34,7 @@ Tentativas feitas antes da v4 não têm a referência da mensagem avaliada, por 
 
 ## Instalação limpa
 
-Execute em ordem `sql/schema.sql`, `sql/02_multi_interfaces.sql`, `sql/03_scenarios_and_judge_limits.sql`, `sql/04_judge_reviews.sql`; configure os Secrets e faça deploy de `public/` + `functions/`. O cadastro inicial do administrador depende de aprovação manual após registro:
+Execute em ordem `sql/schema.sql`, `sql/02_multi_interfaces.sql`, `sql/03_scenarios_and_judge_limits.sql`; configure os Secrets e faça deploy de `public/` + `functions/`. O cadastro inicial do administrador depende de aprovação manual após registro:
 ```sql
 UPDATE users SET role='admin', status='approved' WHERE email='seu@email';
 ```
@@ -88,3 +63,42 @@ Os nomes dos Secrets ficam no Neon; seus valores continuam somente no Cloudflare
 - Os dois Secrets Groq podem compartilhar quotas da mesma conta. Fallback de chave não supera limite comum do provedor.
 - O modo `blocking` do Dify depende do tipo de app. O teste funcional do Dify envia uma pergunta curta ao aplicativo configurado.
 - Mudanças administrativas nos desafios em uma competição em curso podem afetar regras de progressão; planeje versionamento das configurações antes de competições oficiais.
+
+## Versão v4 — histórico, repetição e cronômetro opcional
+
+**Migração obrigatória antes do deploy:** execute `sql/04_replay_history_timers.sql` no Neon (após os arquivos 01–03, que já devem estar aplicados no ambiente v3). Faça um snapshot/backup antes. A migração é incremental: preserva usuários, progresso, mensagens e tentativas. Repetições anteriores à v4 são contabilizadas na primeira execução histórica, não inventadas.
+
+### Recursos
+
+- Vitórias continuam persistidas em `progress.ever_passed`, inclusive durante replays; pré-requisitos usam esta conquista permanente.
+- Cada jogada (`challenge_runs`) possui contador de mensagens `user` e histórico recuperável via `/api/review`, mesmo sem vaga ativa no Dify.
+- O participante não perde a tela ao vencer: vê feedback, número de prompts e botões de revisão/próxima missão. Se habilitado, pode começar novo replay.
+- Administração: `replay_enabled`, `max_replays` (número de repetições **extras**, 0 = nenhuma), `time_limit_minutes` (NULL = sem cronômetro) e `time_limit_policy` (`warn` = aviso, `block` = bloqueio).
+- Painel Participantes → **Ver progresso**: mostra desafios vencidos, avaliações e prompts totais por participante.
+- A contagem de prompts soma todas as gerações de conversa dentro da mesma jogada. `reset` do Dify não zera esse contador.
+- Falha dos juízes continua *fail closed*. Não gera derrota, vitória ou tentativa.
+
+### Exemplos SQL
+
+```sql
+-- Permitir até duas novas jogadas depois da primeira vitória
+UPDATE challenges SET replay_enabled=true,max_replays=2 WHERE position=1;
+
+-- Avisar após 12 minutos, mas deixar a pessoa continuar
+UPDATE challenges SET time_limit_minutes=12,time_limit_policy='warn' WHERE position=1;
+
+-- Sem cronômetro
+UPDATE challenges SET time_limit_minutes=NULL WHERE position=1;
+
+-- Opcional: impedir chat/avaliação depois do prazo
+UPDATE challenges SET time_limit_minutes=20,time_limit_policy='block' WHERE position=2;
+
+-- Conquistas dos participantes
+SELECT u.name,c.title,p.ever_passed,p.run_no,p.completed_at
+FROM progress p JOIN users u ON u.id=p.user_id JOIN challenges c ON c.id=p.challenge_id
+ORDER BY u.name,c.position;
+```
+
+**Teste em homologação:** 1. concluir desafio; 2. conferir feedback sem troca automática; 3. revisar histórico; 4. jogar novamente e conferir que pré-requisitos continuam satisfeitos; 5. contar prompts após reset; 6. conferir limites e relatórios; 7. testar cronômetro com aviso/bloqueio; 8. testar submissões concorrentes e falha dupla do juiz.
+
+Não foi feita validação com sua base Neon ou com Dify/Groq reais. Não implante a migração em produção sem backup e testes.
