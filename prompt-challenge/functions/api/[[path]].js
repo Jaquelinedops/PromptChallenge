@@ -20,30 +20,22 @@ async function verifyPassword(password, stored) {
  return diff===0;
 }
 // __Secure- prefix: the browser rejects this cookie unless it is Secure (cannot be planted over HTTP).
-// __Host- is not usable: the app lives under cyberactivity.com.br/promptchallenge and the router Worker
-// rewrites Path=/ to Path=/promptchallenge/ so the session is never sent to the rest of the site.
+// __Host- is not usable: the app is hosted under /promptchallenge/ on the Netlify domain.
 const SESSION_COOKIE='__Secure-pc_session';
 function cookie(request) { return /(?:^|;\s*)__Secure-pc_session=([^;]+)/.exec(request.headers.get('Cookie')||'')?.[1]||null; }
-function sessionCookie(token,maxAge) {return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`;}
+function sessionCookie(token,maxAge,request) {
+ const origin=request.headers.get('Origin')||'';
+ const path=origin==='https://cyberactivity.com.br'?'/promptchallenge/':'/';
+ return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=${path}; Max-Age=${maxAge}`;
+}
 // 6: dummy hash in valid format, so a login for an unknown e-mail still runs PBKDF2 (no timing oracle).
 const DUMMY_PASSWORD_HASH=`pbkdf2$100000$${'0'.repeat(32)}$${'0'.repeat(64)}`;
-// 5: requests must come through the router Worker, which signs the real client IP.
-// Direct calls to *.pages.dev (production or preview) are rejected. ALLOW_DIRECT_ACCESS=true only for local dev.
-async function trustedClientIp(request,env,url){
- if(env.ALLOW_DIRECT_ACCESS==='true')return request.headers.get('CF-Connecting-IP')||'local';
- // Rejection reasons are logged (never returned to the client) to make deployment errors diagnosable.
- const deny=reason=>{console.error('Proxy check failed:',reason,request.method,url.hostname+url.pathname);return null};
- const secret=env.PROXY_SHARED_SECRET;
- if(!secret)return deny('PROXY_SHARED_SECRET ausente no projeto Pages (configure e faça novo deploy)');
- if(secret.length<32)return deny('PROXY_SHARED_SECRET com menos de 32 caracteres');
- const ip=request.headers.get('X-PC-Client-IP')||'',ts=request.headers.get('X-PC-Timestamp')||'',sig=request.headers.get('X-PC-Signature')||'';
- if(!ip&&!ts&&!sig)return deny('requisição sem cabeçalhos do Worker (acesso direto ao pages.dev ou Worker antigo)');
- if(!ip||ip.length>64||!/^[0-9a-fA-F:.]+$/.test(ip)||!/^\d{10}$/.test(ts)||!/^[0-9a-f]{64}$/.test(sig))return deny('cabeçalhos do Worker malformados');
- if(Math.abs(Math.floor(Date.now()/1000)-Number(ts))>60)return deny('assinatura expirada (>60 s)');
- const key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['verify']);
- const sigBytes=new Uint8Array(sig.match(/../g).map(x=>parseInt(x,16)));
- const ok=await crypto.subtle.verify('HMAC',key,sigBytes,encoder.encode(`${ts}\n${ip}\n${request.method}\n${url.pathname}`));
- return ok?ip:deny('assinatura inválida (segredo diferente entre Worker e Pages)');
+// The application is hosted on Cloudflare Pages and reached through an existing
+// Netlify rewrite at /promptchallenge/. No Cloudflare Worker or HMAC proxy is needed.
+// CF-Connecting-IP is supplied by Cloudflare, not trusted from the browser.
+// Use a stable fallback to preserve rate limiting if this header is unavailable.
+function trustedClientIp(request){
+ return request.headers.get('CF-Connecting-IP') || 'unknown';
 }
 // 2: time limit with 'block' policy is enforced here, using the database clock.
 async function timeExpired(sql,userId,ch){
@@ -168,12 +160,12 @@ async function judgeSettings(sql,scenarioId){const rows=await sql`SELECT coalesc
 export async function onRequest(context) {
  const {request,env}=context;
  const url=new URL(request.url), path=url.pathname.slice(5),method=request.method;
- const clientIp=await trustedClientIp(request,env,url);
- if(!clientIp)return fail(env.PROXY_SHARED_SECRET?.length>=32?'Acesso à API exige o proxy autorizado':'Configuração do proxy incompleta',env.PROXY_SHARED_SECRET?.length>=32?403:503);
+ const clientIp=trustedClientIp(request);
  const allowed=['GET','POST'];if(!allowed.includes(method))return fail('Método não permitido',405);
  if(method==='POST'){
   const origin=request.headers.get('Origin');
-  if(!origin||origin!==url.origin) return fail('Origem inválida',403);
+  // The only additional permitted browser origin is the established Netlify frontend.
+  if(!origin||!['https://cyberactivity.com.br',url.origin].includes(origin)) return fail('Origem inválida',403);
   if(!request.headers.get('Content-Type')?.startsWith('application/json')) return fail('Tipo de conteúdo inválido',415);
  }
  if(!env.DATABASE_URL)return fail('Banco não configurado',503);
@@ -202,11 +194,11 @@ export async function onRequest(context) {
    const u=rows[0];if(u.status!=='approved') return fail('Conta ainda não aprovada',403);
    const token=toHex(crypto.getRandomValues(new Uint8Array(32)));
    await sql`INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(${await hash(token)},${u.id},now()+interval '12 hours')`;
-   const res=json({name:u.name,role:u.role});res.headers.set('Set-Cookie',sessionCookie(token,43200));return res;
+   const res=json({name:u.name,role:u.role});res.headers.set('Set-Cookie',sessionCookie(token,43200,request));return res;
   }
   if(path==='logout'&&method==='POST'){
    const token=cookie(request);if(token){const logged=await currentUser(sql,request);if(logged)await sql`SELECT pc_end_interface(${logged.id})`;await sql`DELETE FROM sessions WHERE token_hash=${await hash(token)}`;}
-   const res=json({ok:true});res.headers.set('Set-Cookie',sessionCookie('',0));return res;
+   const res=json({ok:true});res.headers.set('Set-Cookie',sessionCookie('',0,request));return res;
   }
   const user=await currentUser(sql,request);
   if(!user)return fail('Faça login',401);
