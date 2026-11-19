@@ -28,8 +28,8 @@
 
 /* Contestação e revisão humana */
 .appeal-box{margin-top:14px;padding-top:12px;border-top:1px solid rgba(160,160,180,.25)}
-.appeal-box form{margin-top:8px;display:grid;gap:8px}
-.appeal-box textarea{width:100%;min-height:60px;max-height:120px}
+.appeal-box form{margin-top:12px;display:grid;gap:10px}
+.appeal-box textarea{width:100%;min-height:90px}
 .appeal-review{display:block}
 .appeal-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .appeal-conversation{margin-top:12px;max-height:400px;overflow:auto;white-space:pre-wrap;padding:12px;border:1px solid rgba(160,160,180,.3);border-radius:8px}

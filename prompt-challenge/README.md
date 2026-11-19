@@ -151,5 +151,8 @@ O HTML do painel é devolvido somente por `GET /api/admin/ui`, após autenticaç
 Após uma avaliação não aprovada, o participante pode clicar em **Solicitar revisão do juiz** e enviar justificativa. A solicitação pode ser reencontrada pelo botão **Revisar avaliações** na tela do desafio ou em **Avaliações e pedidos de revisão** no catálogo, mesmo depois de uma nova conversa. A decisão administrativa é feita na aba **Contestações** (aprovar ou reprovar). Requer a migração `sql/05_appeals_and_progress.sql` já aplicada ao Neon.
 
 
-### Interface do jogador — revisão humana
-Após uma avaliação reprovada, aparece somente abaixo do veredicto um campo curto e o botão **Solicitar revisão**. O administrador aprova (registra vitória) ou reprova (preserva o veredicto). O botão **Tentar novamente** reinicia uma conversa nos desafios ativos e, nos concluídos, respeita `replay_enabled` / `max_replays`.
+### Botões do jogador (v4.6)
+
+- **Limpar histórico**: durante um desafio ativo, zera `conversation_id` e incrementa `generation`, limpando a tela do chat; a próxima mensagem inicia conversa nova no Dify. Não altera `run_no` nem conquista ou libera replay. O histórico é preservado no Neon.
+- **Jogar novamente**: exibido somente após a vitória e se permitido em `replay_enabled`/`max_replays`; chama a função `pc_start_replay`, preserva a conquista anterior e inicia outra jogada.
+- O antigo botão **Encerrar** foi removido da tela do jogador (endpoint administrativo/de liberação de vaga preservado).
