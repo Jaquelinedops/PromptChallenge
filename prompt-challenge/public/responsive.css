@@ -57,3 +57,25 @@ button { min-height: 42px; }
   #toast { bottom: max(12px, env(safe-area-inset-bottom)); right: 12px; left: 12px; max-width: none; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+
+
+/* v4.12 - Leitura acessível de conversas vencedoras; sem scroll horizontal */
+#panel-victories,#victoriesList,.victory-entry,.victory-conversation{min-width:0;max-width:100%;box-sizing:border-box}
+#panel-victories .victory-entry{display:flex;flex-wrap:wrap;align-items:center;gap:14px;overflow:hidden}
+#panel-victories .victory-details{flex:1 1 320px;min-width:0;overflow-wrap:anywhere}
+#panel-victories .victory-entry>button{flex:0 0 auto}
+#panel-victories .victory-conversation{flex:1 1 100%;width:100%;max-height:none;overflow:visible;padding:18px 0 4px;border-top:1px solid rgba(160,180,210,.25);display:block}
+.victory-history-heading{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px}
+.victory-history-heading h3{margin:0 0 5px}
+.victory-history-heading p{margin:0}
+.victory-message-list{display:flex;flex-direction:column;gap:12px;min-width:0;width:100%}
+.victory-message{width:100%;min-width:0;max-width:100%;box-sizing:border-box;border:1px solid rgba(150,175,210,.25);background:rgba(130,155,200,.07);border-radius:12px;padding:14px 16px}
+.victory-message-user{border-left:3px solid #63d0ef}
+.victory-message-assistant{border-left:3px solid #9990ff}
+.victory-message-role{font-size:12px;font-weight:700;letter-spacing:.04em;opacity:.75;margin-bottom:8px}
+.victory-message-body{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;line-height:1.55;font-family:inherit;font-size:14px;max-width:100%;min-width:0}
+.victory-message-pagination{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;margin:18px 0}
+.victory-message-pagination button,.victory-close{min-height:40px}
+.victory-history-footer{border-top:1px solid rgba(150,175,210,.2);padding-top:12px}
+.victory-history-footer p{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:600px){#panel-victories .victory-entry>button{width:100%}.victory-message{padding:12px}.victory-history-heading .victory-close{width:100%}.victory-message-pagination{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.victory-message-pagination span{grid-column:1/-1;grid-row:1;text-align:center}.victory-message-pagination button{width:100%}}

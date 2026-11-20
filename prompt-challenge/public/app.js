@@ -121,44 +121,83 @@ function setTab(name){ui.chosenTab=name;for(const b of document.querySelectorAll
 function diagnosticCard(kind,provider){const card=el('div','diagnostic-card');card.append(el('div','eyebrow',kind==='dify'?'ASSISTENTE RAG':'AVALIADOR'),el('h3','',provider.label),el('div','diagnostic-meta',kind==='dify'?`${provider.dify_secret_name} · ${provider.max_active} vagas`:provider.secret_name+' · '+provider.model));const status=el('div','diagnostic-output','Ainda não testada.');const actions=el('div','diagnostic-actions');for(const [mode,label] of [['connect','Testar conexão'],['functional','Teste funcional']]){const button=el('button',mode==='functional'?'ghost':'primary',label);button.onclick=async()=>{button.disabled=true;status.className='diagnostic-output';text(status,'Verificando '+provider.label+'...');try{const r=await api('admin/diagnostics','POST',{kind,id:provider.id,mode});status.className='diagnostic-output '+(r.ok?'good':'bad');text(status,`${r.ok?'✓ Disponível':'✕ Indisponível'} · HTTP ${r.status??'—'} · ${r.latency_ms} ms\n${r.note}`)}catch(e){status.className='diagnostic-output bad';text(status,e.message)}finally{button.disabled=false}};actions.append(button)}card.append(actions,status);return card}
 function renderDiagnostics(){const root=$('diagnostics');root.replaceChildren();for(const iface of ui.admin.interfaces)root.append(diagnosticCard('dify',iface));for(const prov of ui.admin.providers)root.append(diagnosticCard('judge',prov))}
 async function loadAdmin(){try{const [u,c,i,s,j,ap]=await Promise.all(['admin/users','admin/challenges','admin/interfaces','admin/scenarios','admin/judge-settings','admin/appeals'].map(x=>api(x)));ui.admin={users:u.users,challenges:c.challenges,prerequisites:c.prerequisites,interfaces:i.interfaces,scenarios:s.scenarios,scenarioDeps:s.dependencies,providers:j.providers,settings:j.settings[0],overrides:j.overrides,appeals:ap.appeals};renderAdmin()}catch(e){notify('Falha ao carregar painel: '+e.message)}}
+const VICTORY_MESSAGES_PER_PAGE=12;
+let victoriesRequest=0;
+function renderVictoryHistory(card,win,review,source,trigger){
+ const history=el('section','victory-conversation');
+ const heading=el('div','victory-history-heading');
+ const headingText=el('div','');
+ headingText.append(el('h3','','Histórico da jogada '+win.run_no),el('p','muted tiny',review.messages.length+' mensagens registradas'));
+ const close=el('button','ghost victory-close','✕ Fechar conversa');
+ close.type='button';
+ const detach=()=>{history.remove();trigger.textContent='Ver conversa';trigger.setAttribute('aria-expanded','false');trigger.focus()};
+ close.onclick=detach;
+ heading.append(headingText,close);
+ const messages=el('div','victory-message-list');
+ const pager=el('nav','victory-message-pagination');pager.setAttribute('aria-label','Paginação das mensagens');
+ const prev=el('button','ghost','← Anteriores'),next=el('button','ghost','Próximas →');
+ prev.type=next.type='button';
+ const label=el('span','muted');label.setAttribute('aria-live','polite');
+ const list=Array.isArray(review.messages)?review.messages:[];
+ const pages=Math.max(1,Math.ceil(list.length/VICTORY_MESSAGES_PER_PAGE));
+ let current=0;
+ function draw(){
+  messages.replaceChildren();
+  const start=current*VICTORY_MESSAGES_PER_PAGE;
+  for(const m of list.slice(start,start+VICTORY_MESSAGES_PER_PAGE)){
+   const item=el('article','victory-message '+(m.role==='user'?'victory-message-user':'victory-message-assistant'));
+   item.append(el('div','victory-message-role',m.role==='user'?'Participante':'Assistente'));
+   const body=el('div','victory-message-body');text(body,m.content??'');item.append(body);messages.append(item);
+  }
+  if(!list.length)messages.append(el('p','muted','Nenhuma mensagem registrada para esta jogada.'));
+  label.textContent='Mensagens · página '+(current+1)+' de '+pages;
+  prev.disabled=current===0;next.disabled=current>=pages-1;
+ }
+ prev.onclick=()=>{if(current>0){current--;draw();heading.scrollIntoView({block:'nearest'})}};
+ next.onclick=()=>{if(current<pages-1){current++;draw();heading.scrollIntoView({block:'nearest'})}};
+ pager.append(prev,label,next);
+ const footer=el('div','victory-history-footer');
+ footer.append(el('p','muted','Origem da vitória: '+source));
+ if(win.verdict)footer.append(el('p','muted','Parecer do juiz: '+win.verdict));
+ if(win.admin_note)footer.append(el('p','muted','Observação do administrador: '+win.admin_note));
+ history.append(heading,messages,pager,footer);
+ card.append(history);trigger.textContent='Fechar conversa';trigger.setAttribute('aria-expanded','true');
+ draw();
+}
 async function loadVictories(page=0){
  const root=$('victoriesList');if(!root)return;
+ const requestId=++victoriesRequest;
  root.replaceChildren(el('p','muted','Carregando conversas vencedoras...'));
+ $('victoriesPrevious').disabled=true;$('victoriesNext').disabled=true;
  try{
   const data=await api('admin/victories?page='+page);
+  if(requestId!==victoriesRequest)return;
   ui.victoriesPage=data.page;
   root.replaceChildren();
   if(!data.victories.length)root.append(el('p','muted',page?'Não existem mais vitórias nesta página.':'Nenhuma conversa vencedora registrada.'));
   for(const win of data.victories){
-   const card=el('div','entry victory-entry');
+   const card=el('article','entry victory-entry');
    const details=el('div','victory-details');
    const source=win.source==='admin'?'Aprovada pelo administrador (reavaliação)':'Aprovada pelo juiz';
    details.append(el('b','',win.player_name+' · '+win.challenge_title),
     el('div','muted',win.scenario_title+' · Jogada '+win.run_no+' · '+win.prompt_count+' prompts'),
     el('div','muted',source+' · '+(win.approved_at?new Date(win.approved_at).toLocaleString('pt-BR'):'Data indisponível')));
-   const open=el('button','ghost','Ver conversa completa');
+   const open=el('button','ghost','Ver conversa');open.type='button';open.setAttribute('aria-expanded','false');
    open.onclick=async()=>{
-    open.disabled=true;
+    if(card.querySelector('.victory-conversation')){card.querySelector('.victory-conversation').remove();open.textContent='Ver conversa';open.setAttribute('aria-expanded','false');return}
+    open.disabled=true;open.textContent='Carregando...';
     try{
      const review=await api('review?challenge_id='+encodeURIComponent(win.challenge_id)+'&run_no='+win.run_no+'&user_id='+encodeURIComponent(win.user_id));
-     const existing=card.querySelector('.victory-conversation');if(existing){existing.remove();return}
-     const history=el('div','victory-conversation');
-     history.append(el('h3','','Histórico da jogada '+win.run_no));
-     for(const m of review.messages)history.append(bubble(m.role,m.content));
-     if(!review.messages.length)history.append(el('p','muted','Nenhuma mensagem registrada para esta jogada.'));
-     history.append(el('p','muted','Origem da vitória: '+source));
-     if(win.verdict)history.append(el('p','muted','Parecer do juiz: '+win.verdict));
-     if(win.admin_note)history.append(el('p','muted','Observação do administrador: '+win.admin_note));
-     const close=el('button','ghost','Fechar conversa');close.onclick=()=>history.remove();history.append(close);
-     card.append(history);
-    }catch(err){notify(err.message)}finally{open.disabled=false}
+     if(!card.isConnected)return;
+     renderVictoryHistory(card,win,review,source,open);
+    }catch(err){notify(err.message);open.textContent='Ver conversa'}finally{open.disabled=false}
    };
    card.append(details,open);root.append(card);
   }
   $('victoriesPrevious').disabled=page===0;
   $('victoriesNext').disabled=!data.has_more;
-  text($('victoriesPage'),'Página '+(page+1));
- }catch(err){root.replaceChildren(el('p','status-bad','Falha ao carregar vitórias: '+err.message));notify(err.message)}
+  text($('victoriesPage'),'Página '+(page+1)+(data.has_more?' · Mais resultados disponíveis':''));
+ }catch(err){if(requestId!==victoriesRequest)return;root.replaceChildren(el('p','status-bad','Falha ao carregar vitórias: '+err.message));notify(err.message)}
 }
 function renderAppeals(){const root=$('appealsList');root.replaceChildren();const pending=ui.admin?.appeals||[];
  if(!pending.length){root.append(el('p','muted','Nenhuma contestação pendente.'));return}
