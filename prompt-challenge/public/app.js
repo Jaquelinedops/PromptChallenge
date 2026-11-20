@@ -12,9 +12,23 @@ $('loginTab').onclick=()=>authMode(false);$('registerTab').onclick=()=>authMode(
 $('authForm').onsubmit=async event=>{event.preventDefault();const payload={email:$('email').value,password:$('password').value};if(ui.register)payload.name=$('name').value;try{const result=await api(ui.register?'register':'login','POST',payload);if(ui.register){notify(result.message);authMode(false)}else{ui.me=result;await start()}}catch(e){notify(e.message)}};
 async function start(){show('auth',false);setIdentity();if(ui.me.role==='admin'){const data=await api('admin/ui');$('admin').innerHTML=data.markup;bindAdmin();show('admin',true)}else show('admin',false);await refresh();if(ui.me.role==='admin')await loadAdmin()}
 function bubble(role,content){const n=el('div','bubble '+(role==='user'?'user':''));text(n,content);return n}
+// 'Fase Inicial' always precedes numbered phases, regardless of stale DB positions.
+// For custom scenario names, retain the configured numeric position.
+function phaseOrder(title,position){
+ const name=String(title||'').trim().toLocaleLowerCase('pt-BR').replace(/\s+/g,' ');
+ if(name==='fase inicial'||name==='fase 1')return 1;
+ const numbered=name.match(/^fase (\d+)$/);
+ if(numbered)return Number(numbered[1]);
+ return Number(position)||Number.MAX_SAFE_INTEGER;
+}
+function compareChallengesByPhase(a,b){
+ return phaseOrder(a.scenario_title,a.scenario_position)-phaseOrder(b.scenario_title,b.scenario_position)
+  || Number(a.position||0)-Number(b.position||0)
+  || String(a.id||'').localeCompare(String(b.id||''));
+}
 function renderCatalogue(challenges){
  const node=$('catalogue');node.replaceChildren();
- for(const c of [...(challenges||[])].sort((a,b)=>Number(a.scenario_position||0)-Number(b.scenario_position||0)||Number(a.position)-Number(b.position))){
+ for(const c of [...(challenges||[])].sort(compareChallengesByPhase)){
   const item=el('article','mission-item'+(c.passed?' passed':'')+(!c.unlocked?' locked':''));
   item.append(el('div','index',`${c.scenario_title} · #${c.position}`),el('h3','',c.title),el('div','status',c.passed?'✓ Concluído':c.unlocked?'● Disponível':'🔒 Bloqueado'));
   let label,action,enabled;
@@ -162,12 +176,12 @@ for(const [id,keys] of [['phaseDifySecret',difyKeys],['phaseJudgeSecret',judgeKe
  for(const key of keys)select.append(new Option(key,key));
  if(keys.includes(previous))select.value=previous;
 }
-const scenarios=$('scenarios');scenarios.replaceChildren();for(const s of d.scenarios)scenarios.append(rowLine(s.title,`${s.slug} · nível ${s.position} · ${s.active?'ativo':'inativo'}`,()=>{fieldMap([['scenarioId','id'],['scenarioSlug','slug'],['scenarioTitle','title'],['scenarioDescription','description'],['scenarioPosition','position']],s);$('scenarioActive').checked=s.active;$('phaseDifySecret').value=s.dify_secret_name||'';$('phaseJudgeSecret').value=s.judge_secret_name||'';setSelected('scenarioDependencies',d.scenarioDeps.filter(x=>x.scenario_id===s.id).map(x=>x.prerequisite_scenario_id));$('scenarioForm').scrollIntoView({behavior:'smooth'})}));
+const scenarios=$('scenarios');scenarios.replaceChildren();for(const s of [...d.scenarios].sort((a,b)=>phaseOrder(a.title,a.position)-phaseOrder(b.title,b.position)||String(a.id).localeCompare(String(b.id))))scenarios.append(rowLine(s.title,`${s.slug} · nível ${s.position} · ${s.active?'ativo':'inativo'}`,()=>{fieldMap([['scenarioId','id'],['scenarioSlug','slug'],['scenarioTitle','title'],['scenarioDescription','description'],['scenarioPosition','position']],s);$('scenarioActive').checked=s.active;$('phaseDifySecret').value=s.dify_secret_name||'';$('phaseJudgeSecret').value=s.judge_secret_name||'';setSelected('scenarioDependencies',d.scenarioDeps.filter(x=>x.scenario_id===s.id).map(x=>x.prerequisite_scenario_id));$('scenarioForm').scrollIntoView({behavior:'smooth'})}));
 for(const id of ['poolScenario','challengeScenario','scenarioDependencies'])fillSelect(id,d.scenarios);
 fillSelect('limitsScenario',d.scenarios,true);
 const pools=$('interfaces');pools.replaceChildren();for(const p of d.interfaces)pools.append(rowLine(p.label,`${p.active_sessions}/${p.max_active} vagas · ${p.duration_minutes} min · ${p.dify_secret_name} / ${p.judge_secret_name} · ${p.enabled?'ativo':'inativo'}`,()=>{fieldMap([['poolId','id'],['poolLabel','label'],['poolPriority','priority'],['poolCapacity','max_active'],['poolDuration','duration_minutes'],['poolIdle','idle_minutes'],['poolDifySecret','dify_secret_name'],['poolScenario','scenario_id']],p);$('poolEnabled').checked=p.enabled;$('poolJudgeSecret').value=p.judge_secret_name||'';$('interfaceForm').scrollIntoView({behavior:'smooth'})}));
 const pro=$('providers');pro.replaceChildren();for(const p of d.providers)pro.append(rowLine(p.label,`${p.secret_name} · ${p.model} · prioridade ${p.priority}`,()=>{fieldMap([['providerId','id'],['providerLabel','label'],['providerSecret','secret_name'],['providerModel','model'],['providerPriority','priority']],p);$('providerEnabled').checked=p.enabled;$('providerForm').scrollIntoView({behavior:'smooth'})}));
-const cs=$('challenges');cs.replaceChildren();for(const c of d.challenges)cs.append(rowLine('#'+c.position+' · '+c.title,`${d.scenarios.find(s=>s.id===c.scenario_id)?.title||'Cenário'} · ${c.judge_mode} · ${c.unlock_mode}`,()=>{fieldMap([['editId','id'],['challengeScenario','scenario_id'],['unlockMode','unlock_mode'],['position','position'],['title','title'],['challengeDescription','description'],['challengeHint','hint'],['judgeMode','judge_mode'],['expected','expected_answer'],['judgePrompt','judge_prompt']],c);$('active').checked=c.active;$('replayEnabled').checked=!!c.replay_enabled;$('maxReplays').value=c.max_replays??0;$('timeLimit').value=c.time_limit_minutes??'';$('timePolicy').value=c.time_limit_policy||'warn';setChallengeFormMode(c);setChallengePrerequisites(d.prerequisites.filter(p=>p.challenge_id===c.id).map(p=>p.prerequisite_id));$('challengeForm').scrollIntoView({behavior:'smooth'})}));
+const cs=$('challenges');cs.replaceChildren();for(const c of [...d.challenges].sort((a,b)=>compareChallengesByPhase({...a,scenario_title:d.scenarios.find(s=>s.id===a.scenario_id)?.title,scenario_position:d.scenarios.find(s=>s.id===a.scenario_id)?.position},{...b,scenario_title:d.scenarios.find(s=>s.id===b.scenario_id)?.title,scenario_position:d.scenarios.find(s=>s.id===b.scenario_id)?.position})))cs.append(rowLine('#'+c.position+' · '+c.title,`${d.scenarios.find(s=>s.id===c.scenario_id)?.title||'Cenário'} · ${c.judge_mode} · ${c.unlock_mode}`,()=>{fieldMap([['editId','id'],['challengeScenario','scenario_id'],['unlockMode','unlock_mode'],['position','position'],['title','title'],['challengeDescription','description'],['challengeHint','hint'],['judgeMode','judge_mode'],['expected','expected_answer'],['judgePrompt','judge_prompt']],c);$('active').checked=c.active;$('replayEnabled').checked=!!c.replay_enabled;$('maxReplays').value=c.max_replays??0;$('timeLimit').value=c.time_limit_minutes??'';$('timePolicy').value=c.time_limit_policy||'warn';setChallengeFormMode(c);setChallengePrerequisites(d.prerequisites.filter(p=>p.challenge_id===c.id).map(p=>p.prerequisite_id));$('challengeForm').scrollIntoView({behavior:'smooth'})}));
 populateChallengePrerequisites(d.challenges);
 if(!ui.limitEdited){$('judgeRate').value=d.settings.judge_rate_limit;$('judgeWindow').value=d.settings.judge_window_seconds;$('judgeMax').value=d.settings.judge_max_per_challenge}
 }

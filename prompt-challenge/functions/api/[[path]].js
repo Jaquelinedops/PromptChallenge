@@ -60,7 +60,7 @@ const providerEndpoint=(env,key,fallback,host,path)=>{const v=String(env[key]||f
 const validId=id=>typeof id==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id);
 const validUrl=(v,host,path)=>{try{const u=new URL(v);return u.protocol==='https:'&&u.hostname===host&&!u.username&&!u.password&&!u.search&&!u.hash&&u.pathname.replace(/\/$/,'')===path}catch{return false}};
 async function challengesForUser(sql,user){
- const all=await sql`SELECT c.id,c.scenario_id,c.position,c.title,c.description,c.hint,c.active,c.unlock_mode,c.judge_mode,s.title AS scenario_title,s.position AS scenario_position,s.id AS sid FROM challenges c JOIN scenarios s ON s.id=c.scenario_id WHERE s.active AND c.active ORDER BY s.position,c.position`;
+ const all=await sql`SELECT c.id,c.scenario_id,c.position,c.title,c.description,c.hint,c.active,c.unlock_mode,c.judge_mode,s.title AS scenario_title,s.position AS scenario_position,s.id AS sid FROM challenges c JOIN scenarios s ON s.id=c.scenario_id WHERE s.active AND c.active ORDER BY CASE WHEN lower(btrim(s.title)) IN ('fase inicial','fase 1') THEN 1 WHEN lower(btrim(s.title)) ~ '^fase[[:space:]]+[0-9]+$' THEN substring(lower(btrim(s.title)) from '[0-9]+$')::integer ELSE s.position END,c.position,c.id`;
  const passed=await sql`SELECT challenge_id FROM progress WHERE user_id=${user.id} AND ever_passed=true`;
  const unlocked=await sql`SELECT challenge_id FROM pc_unlocked_challenges(${user.id})`;
  const withJudgments=await sql`SELECT DISTINCT challenge_id FROM attempts WHERE user_id=${user.id}`;
@@ -344,7 +344,7 @@ export async function onRequest(context) {
      (SELECT count(*)::int FROM messages m WHERE m.user_id=p.user_id AND m.challenge_id=p.challenge_id AND m.role='user') AS total_prompts,
      (SELECT count(*)::int FROM attempts a WHERE a.user_id=p.user_id AND a.challenge_id=p.challenge_id) AS evaluations,
      (SELECT count(*)::int FROM attempts a WHERE a.user_id=p.user_id AND a.challenge_id=p.challenge_id AND a.result=true) AS victories
-     FROM progress p JOIN challenges c ON c.id=p.challenge_id JOIN scenarios s ON s.id=c.scenario_id WHERE p.user_id=${participant} ORDER BY s.position,c.position`;
+     FROM progress p JOIN challenges c ON c.id=p.challenge_id JOIN scenarios s ON s.id=c.scenario_id WHERE p.user_id=${participant} ORDER BY CASE WHEN lower(btrim(s.title)) IN ('fase inicial','fase 1') THEN 1 WHEN lower(btrim(s.title)) ~ '^fase[[:space:]]+[0-9]+$' THEN substring(lower(btrim(s.title)) from '[0-9]+$')::integer ELSE s.position END,c.position,c.id`;
    const totals=await sql`SELECT count(*)::int AS total_prompts FROM messages WHERE user_id=${participant} AND role='user'`;
    return json({participant:people[0],progress:rows,totals:totals[0]});
   }
@@ -397,7 +397,7 @@ export async function onRequest(context) {
      return json({kind,id,configured,ok:false,status:null,latency_ms:Date.now()-started,mode,note:e.name==='AbortError'?'Timeout de 18 segundos':'Erro de rede ou conexão'});
     }finally{clearTimeout(timer)}
    }
-   if(path==='admin/scenarios'&&method==='GET')return json({scenarios:await sql`SELECT s.*, (SELECT p.dify_secret_name FROM scenario_pools sp JOIN interface_pools p ON p.id=sp.pool_id WHERE sp.scenario_id=s.id ORDER BY p.priority,p.created_at LIMIT 1) AS dify_secret_name, (SELECT p.judge_secret_name FROM scenario_pools sp JOIN interface_pools p ON p.id=sp.pool_id WHERE sp.scenario_id=s.id ORDER BY p.priority,p.created_at LIMIT 1) AS judge_secret_name FROM scenarios s ORDER BY s.position,s.id`,dependencies:await sql`SELECT * FROM scenario_prerequisites`});
+   if(path==='admin/scenarios'&&method==='GET')return json({scenarios:await sql`SELECT s.*, (SELECT p.dify_secret_name FROM scenario_pools sp JOIN interface_pools p ON p.id=sp.pool_id WHERE sp.scenario_id=s.id ORDER BY p.priority,p.created_at LIMIT 1) AS dify_secret_name, (SELECT p.judge_secret_name FROM scenario_pools sp JOIN interface_pools p ON p.id=sp.pool_id WHERE sp.scenario_id=s.id ORDER BY p.priority,p.created_at LIMIT 1) AS judge_secret_name FROM scenarios s ORDER BY CASE WHEN lower(btrim(s.title)) IN ('fase inicial','fase 1') THEN 1 WHEN lower(btrim(s.title)) ~ '^fase[[:space:]]+[0-9]+$' THEN substring(lower(btrim(s.title)) from '[0-9]+$')::integer ELSE s.position END,s.id`,dependencies:await sql`SELECT * FROM scenario_prerequisites`});
    if(path==='admin/scenarios'&&method==='POST'){
     const {id,slug,title,description,position,active,prerequisite_ids=[],dify_secret_name="",judge_secret_name=""}=await input(request);
     if(!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug||'')||typeof title!=='string'||title.length<2||title.length>180||typeof description!=='string'||description.length>3000||!Number.isInteger(position)||position<1||typeof active!=='boolean'||!Array.isArray(prerequisite_ids)||prerequisite_ids.length>30||!prerequisite_ids.every(validId))return fail('Cenário inválido');
@@ -452,7 +452,7 @@ export async function onRequest(context) {
     else await sql`INSERT INTO judge_providers(label,secret_name,endpoint,model,priority,enabled) VALUES(${label},${secret_name},${GROQ_DEFAULT},${model},${priority},${enabled})`;
     return json({ok:true});
    }
-   if(path==='admin/challenges'&&method==='GET')return json({challenges:await sql`SELECT * FROM challenges ORDER BY (SELECT position FROM scenarios WHERE id=challenges.scenario_id),position,id`,prerequisites:await sql`SELECT * FROM challenge_prerequisites`});
+   if(path==='admin/challenges'&&method==='GET')return json({challenges:await sql`SELECT c.* FROM challenges c JOIN scenarios s ON s.id=c.scenario_id ORDER BY CASE WHEN lower(btrim(s.title)) IN ('fase inicial','fase 1') THEN 1 WHEN lower(btrim(s.title)) ~ '^fase[[:space:]]+[0-9]+$' THEN substring(lower(btrim(s.title)) from '[0-9]+$')::integer ELSE s.position END,c.position,c.id`,prerequisites:await sql`SELECT * FROM challenge_prerequisites`});
    if(path==='admin/challenges'&&method==='POST'){
     const d=await input(request),{id,scenario_id,position,title,description,hint,judge_mode,expected_answer,judge_prompt,unlock_mode,prerequisite_ids=[],active,replay_enabled=false,max_replays=0,time_limit_minutes=null,time_limit_policy='warn'}=d;
     if(!validId(scenario_id)||!Number.isInteger(position)||position<1||typeof title!=='string'||!title.trim()||title.length>180||typeof description!=='string'||!description.trim()||description.length>5000||typeof hint!=='string'||hint.length>2500||!['exact','llm'].includes(judge_mode)||typeof expected_answer!=='string'||expected_answer.length>5000||typeof judge_prompt!=='string'||judge_prompt.length>5000||!['sequential','prerequisites','open'].includes(unlock_mode)||!Array.isArray(prerequisite_ids)||prerequisite_ids.length>30||!prerequisite_ids.every(validId)||typeof active!=='boolean'||typeof replay_enabled!=='boolean'||!Number.isInteger(max_replays)||max_replays<0||max_replays>100||!(time_limit_minutes===null||(Number.isInteger(time_limit_minutes)&&time_limit_minutes>=1&&time_limit_minutes<=1440))||!['warn','block'].includes(time_limit_policy))return fail('Desafio inválido');
